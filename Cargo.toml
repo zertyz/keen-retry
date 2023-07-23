@@ -5,7 +5,12 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[workspace]
+
 [dependencies]
 
 # might it be a good idea to use the `retry` crate here, giving me those nice time-based retrying mechanisms?
 # to use `retry`, I'd do it when calling the operation... and map its response to `retry`s OperationResult<Ok, Retryable, Fatal>
+
+[dev-dependencies]
+thiserror = "1.0"
