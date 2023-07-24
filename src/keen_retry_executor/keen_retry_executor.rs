@@ -55,10 +55,10 @@ KeenRetryExecutor<OkResult,
                     std::thread::sleep(delay);
                     let new_retry_result = retry_operation(retry_payload);
                     retry_payload = match new_retry_result {
-                        Ok(RetryConsumerResult::Ok    { payload })                 => return ResolvedResult::Recovered { payload, retry_errors },
+                        Ok(RetryConsumerResult::Ok    { payload })                       => return ResolvedResult::Recovered { payload, retry_errors },
                         Ok(RetryConsumerResult::Retry { payload, error }) => { retry_errors.push(error); payload },
                         Ok(RetryConsumerResult::Fatal { payload, error }) => return ResolvedResult::Unrecoverable { payload: Some(payload), retry_errors, fatal_error: error },
-                        Err(fatal_error)                                              => return ResolvedResult::Unrecoverable { payload: None,         retry_errors, fatal_error },
+                        Err(fatal_error)                                                => return ResolvedResult::Unrecoverable { payload: None,         retry_errors, fatal_error },
                     }
                 }
                 ResolvedResult::GivenUp { payload: retry_payload, retry_errors }
