@@ -12,7 +12,7 @@
 //!   4) gave up retrying due to exceeding the max attempts without success;
 //!   5) failed fatably while retrying.
 
-use keen_retry::RetryConsumerResult;
+use keen_retry::{RetryConsumerResult, RetryProducerResult};
 use std::{
     fmt::Debug,
     time::Duration,
@@ -271,7 +271,7 @@ impl Socket {
             .retry_with_async(|_| cloned_self.connect_to_server_retry())
             .with_delays(RETRY_DELAY_MILLIS.into_iter().map(|millis| Duration::from_millis(millis)))
             .await
-            .inspect_recovered(|_payload, retry_errors_list| println!("connect_to_server(): successfully connected after retrying {} times (failed attempts: {:?})", retry_errors_list.len(), retry_errors_list))
+            .inspect_recovered(|_, _, retry_errors_list| println!("connect_to_server(): successfully connected after retrying {} times (failed attempts: {:?})", retry_errors_list.len(), retry_errors_list))
             .into()
     }
 
@@ -285,20 +285,20 @@ impl Socket {
 
         let loggable_payload = format!("{:?}", payload);
         self.send_retry(payload)
-            .map_ok_result(|_| (loggable_payload, Duration::ZERO))
+            .map_ok(|_,_| ( (loggable_payload, Duration::ZERO), () ))
             .inspect_fatal(|payload, fatal_err| println!("`send()`: fatal error (won't retry): {:?}", fatal_err))
-            .map_retry_payload(|payload| ( (payload, SystemTime::now() )) )
+            .map_input(|payload| ( (payload, SystemTime::now() )) )
             .retry_with_async(|(payload, retry_start)| async move {
                 let loggable_payload = format!("{:?}", &payload);
                 if !self.is_connected() {
                     if let Err(err) = self.connect_to_server().await {
                         println!("`send({loggable_payload})`: Error attempting to reconnect: {}", err);
-                        return RetryConsumerResult::Fatal { payload: (payload, retry_start), error: TransportErrors::CannotReconnect {payload: None, root_cause: err.into()} };
+                        return RetryConsumerResult::Fatal { input: (payload, retry_start), error: TransportErrors::CannotReconnect {payload: None, root_cause: err.into()} };
                     }
                 }
                 self.send_retry(payload)
-                    .map_ok_result(|_| (loggable_payload, retry_start.elapsed().unwrap()) )
-                    .map_retry_payload(|payload| (payload, retry_start) )
+                    .map_ok(|_,_| ( (loggable_payload, retry_start.elapsed().unwrap()), () ))
+                    .map_input(|payload| (payload, retry_start) )
             })
             .with_delays(RETRY_DELAY_MILLIS.into_iter().map(|millis| Duration::from_millis(millis)))
             .await
@@ -307,10 +307,12 @@ impl Socket {
                 let (payload, retry_start) = payload_and_retry_start.as_ref().map_or_else(|| (None, None), |v| (Some(&v.0), Some(v.1.elapsed().unwrap())));
                 println!("`send({:?})`: fatal error after trying {} time(s) in {:?}: {:?}", payload, retry_errors_list.len()+1, retry_start, fatal_error)
             })
-            .inspect_recovered(|(loggable_payload, duration), retry_errors_list| println!("send({loggable_payload}): succeeded after trying {} time(s) in {:?}: {:?}", retry_errors_list.len()+1, duration, retry_errors_list))
-            // remaps the types back to their originals, so this will be conversible into a `Result<>`
+            .inspect_recovered(|(loggable_payload, duration), _output, retry_errors_list| println!("send({loggable_payload}): succeeded after trying {} time(s) in {:?}: {:?}", retry_errors_list.len()+1, duration, retry_errors_list))
+            // remaps the input types back to their originals, simulating we are interested in only part of it (that other part was usefull only for instrumentation)
             .map_retry_payload(|(loggable_payload, retry_start)| loggable_payload)
-            .map_ok_result(|(loggable_payload, duration)| loggable_payload)
+            .map_reported_input(|loggable_payload_and_duration| loggable_payload_and_duration.map(|v| v.0))
+            // demonstrates how to map the reported input (`loggable_payload` in our case) into the output, so it will be available at final `Ok(loggable_payload)` result
+            .map_reported_input_and_output(|reported_input, output| (output, reported_input.unwrap_or("__BUG!!__MISSING__REPORTED_INPUT__".to_string())))
             // go an extra mile to demonstrate how to place back the payloads of failed requests in `Option<>` field
             .map_errors(|mut fatal_error, payload| {
                             fatal_error.for_payload(|mut_payload| payload.and_then(|payload| mut_payload.replace(payload)));
@@ -338,10 +340,10 @@ impl Socket {
     async fn connect_to_server_retry(self: &Arc<Self>) -> RetryConsumerResult<(), (), ConnectionErrors> {
         self.connect_to_server_raw().await
             .map_or_else(|error| match error.is_fatal() {
-                            true  => RetryConsumerResult::Fatal { payload: (), error },
-                            false => RetryConsumerResult::Retry { payload: (), error },
+                            true  => RetryConsumerResult::Fatal { input: (), error },
+                            false => RetryConsumerResult::Retry { input: (), error },
                          },
-                         |_| RetryConsumerResult::Ok {payload: ()})
+                         |_| RetryConsumerResult::Ok { reported_input: (), output: () })
     }
 
     /// Simulates a real connection, failing according to the configuration
@@ -372,14 +374,14 @@ impl Socket {
             .map_or_else(|error| match error.is_fatal() {
                              true  => {
                                  let (payload, error) = error.split();
-                                 RetryConsumerResult::Fatal { payload, error }
+                                 RetryConsumerResult::Fatal { input: payload, error }
                              },
                              false => {
                                  let (payload, error) = error.split();
-                                 RetryConsumerResult::Retry { payload, error }
+                                 RetryConsumerResult::Retry { input: payload, error }
                              },
                          },
-                         |_| RetryConsumerResult::Ok { payload: () })
+                         |_| RetryConsumerResult::Ok { reported_input: (), output: () })
     }
 
     fn send_raw<T: Debug + PartialEq>
@@ -405,20 +407,20 @@ impl Socket {
     }
 
     fn receive_retry(&self)
-                    -> RetryConsumerResult<&'static str, (), TransportErrors<&'static str>> {
+                    -> RetryProducerResult<&'static str, TransportErrors<&'static str>> {
 
         self.receive_raw()
             .map_or_else(|error| match error.is_fatal() {
                              true  => {
                                  let (_payload, error) = error.split();
-                                 RetryConsumerResult::Fatal { payload: (), error }
+                                 RetryProducerResult::Fatal { input: (), error }
                              },
                              false => {
                                  let (_payload, error) = error.split();
-                                 RetryConsumerResult::Retry { payload: (), error }
+                                 RetryProducerResult::Retry { input: (), error }
                              },
                          },
-                         |payload| RetryConsumerResult::Ok { payload })
+                         |payload| RetryProducerResult::Ok { reported_input: (), output: payload })
     }
 
     /// This one doesn't fail extensively... all possible retries & recoveries are already tested in connect() & send().\
