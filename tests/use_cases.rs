@@ -86,7 +86,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     let case_name = "2) Failed fatably at the first shot";
     println!("\n{}:", case_name);
     let to_send = || MyPayload { message: case_name };
-    let expected = Err(SendingErrors::QuotaExhausted { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
+    let expected = Err(TransportErrors::QuotaExhausted { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
     let mut socket = Socket::new(13, 1, 11, 13, 10, 1);
     socket.connect_to_server().await?;
     let result = socket.send(to_send()).await;
@@ -112,7 +112,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
 
     let case_name = "4) Failed due to give up retrying `send()` after exceeding 13 attempts";
     println!("\n{}:", case_name);
-    let expected = Err(SendingErrors::ConnectionDropped { payload: None, root_cause: format!("any root cause....").into() });
+    let expected = Err(TransportErrors::ConnectionDropped { payload: None, root_cause: format!("any root cause....").into() });
     let mut socket = Socket::new(13, 1, 999, 13, 15, 16);
     socket.connect_to_server().await?;
     let result = socket.send(MyPayload { message: case_name }).await;
@@ -122,7 +122,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     let case_name = "5.1) Failed fatably during the 10th retry attempt (in `send()`)";
     println!("\n{}:", case_name);
     let to_send = || MyPayload { message: case_name };
-    let expected = Err(SendingErrors::QuotaExhausted { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
+    let expected = Err(TransportErrors::QuotaExhausted { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
     let mut socket = Socket::new(13, 1, 999, 13, 999, 10);
     socket.connect_to_server().await?;
     let result = socket.send(to_send()).await;
@@ -132,7 +132,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     let case_name = "5.2) Failed fatably during a retry attempt (on reconnection)";
     println!("\n{}:", case_name);
     let to_send = || MyPayload { message: case_name };
-    let expected = Err(SendingErrors::CannotReconnect { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
+    let expected = Err(TransportErrors::CannotReconnect { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
     let mut socket = Socket::new(13, 999, 999, 13, 15, 16);
     let result = socket.send(to_send()).await;
     assert_eq!(result, expected, "In '{}'", case_name);
@@ -160,7 +160,7 @@ impl ConnectionErrors {
 }
 
 #[derive(Error, Debug)]
-enum SendingErrors<Payload: Debug + PartialEq> {
+enum TransportErrors<Payload: Debug + PartialEq> {
     /// A fatal error (while sending)
     #[error("The sending quota has exhausted for the day.")]
     QuotaExhausted { payload: Option<Payload>, root_cause: StdErrorType },
@@ -174,31 +174,31 @@ enum SendingErrors<Payload: Debug + PartialEq> {
     #[error("Socket is not connected.")]
     NotConnected { payload: Option<Payload> },
 }
-impl<Payload: Debug + PartialEq> SendingErrors<Payload> {
+impl<Payload: Debug + PartialEq> TransportErrors<Payload> {
     pub fn is_fatal(&self) -> bool {
         match self {
-            SendingErrors::QuotaExhausted    {..} => true,
-            SendingErrors::ConnectionDropped {..} => false,
-            SendingErrors::CannotReconnect   {..} => true,
-            SendingErrors::NotConnected { .. }    => false,
+            TransportErrors::QuotaExhausted    {..} => true,
+            TransportErrors::ConnectionDropped {..} => false,
+            TransportErrors::CannotReconnect   {..} => true,
+            TransportErrors::NotConnected { .. }    => false,
         }
     }
     /// Extracts the payload from the given error (panics if `self` is not a retryable error),
     pub fn split(self) -> (Payload, Self) {
         match self {
-            SendingErrors::QuotaExhausted { payload, root_cause } => {
+            TransportErrors::QuotaExhausted { payload, root_cause } => {
                 ( payload.expect("SendingErrors: extract_retry_payload(SendingErrors::QuotaExhausted {..}): parameter didn't have a payload"),
                   Self::QuotaExhausted { payload: None, root_cause } )
             },
-            SendingErrors::ConnectionDropped { payload, root_cause } => {
+            TransportErrors::ConnectionDropped { payload, root_cause } => {
                 ( payload.expect("SendingErrors: extract_retry_payload(SendingErrors::ConnectionDropped {..}): parameter didn't have a payload"),
                   Self::ConnectionDropped { payload: None, root_cause } )
             },
-            SendingErrors::CannotReconnect { payload, root_cause } => {
+            TransportErrors::CannotReconnect { payload, root_cause } => {
                 ( payload.expect("SendingErrors: extract_retry_payload(SendingErrors::CannotReconnect {..}): parameter didn't have a payload"),
                   Self::CannotReconnect { payload: None, root_cause } )
             },
-            SendingErrors::NotConnected { payload } => {
+            TransportErrors::NotConnected { payload } => {
                 ( payload.expect("SendingErrors: extract_retry_payload(SendingErrors::NotConnected {..}): parameter didn't have a payload"),
                   Self::NotConnected { payload: None } )
             },
@@ -206,20 +206,20 @@ impl<Payload: Debug + PartialEq> SendingErrors<Payload> {
     }
     pub fn for_payload<AnyRet>(&mut self, f: impl FnOnce(&mut Option<Payload>) -> AnyRet) -> AnyRet {
         match self {
-            SendingErrors::QuotaExhausted    { ref mut payload, .. } => f(payload),
-            SendingErrors::ConnectionDropped { ref mut payload, .. } => f(payload),
-            SendingErrors::CannotReconnect   { ref mut payload, .. } => f(payload),
-            SendingErrors::NotConnected      { ref mut payload, .. } => f(payload),
+            TransportErrors::QuotaExhausted    { ref mut payload, .. } => f(payload),
+            TransportErrors::ConnectionDropped { ref mut payload, .. } => f(payload),
+            TransportErrors::CannotReconnect   { ref mut payload, .. } => f(payload),
+            TransportErrors::NotConnected      { ref mut payload, .. } => f(payload),
         }
     }
 }
-impl<Payload: Debug + PartialEq> PartialEq for SendingErrors<Payload> {
+impl<Payload: Debug + PartialEq> PartialEq for TransportErrors<Payload> {
     fn eq(&self, other: &Self) -> bool {
         match self {
-            SendingErrors::QuotaExhausted    { payload, .. } => if let SendingErrors::QuotaExhausted    { payload: other_payload, ..} = other { payload == other_payload } else { false },
-            SendingErrors::ConnectionDropped { payload, .. } => if let SendingErrors::ConnectionDropped { payload: other_payload, ..} = other { payload == other_payload } else { false },
-            SendingErrors::CannotReconnect   { payload, .. } => if let SendingErrors::CannotReconnect   { payload: other_payload, ..} = other { payload == other_payload } else { false },
-            SendingErrors::NotConnected      { payload, .. } => if let SendingErrors::NotConnected      { payload: other_payload }    = other { payload == other_payload } else { false },
+            TransportErrors::QuotaExhausted    { payload, .. } => if let TransportErrors::QuotaExhausted    { payload: other_payload, ..} = other { payload == other_payload } else { false },
+            TransportErrors::ConnectionDropped { payload, .. } => if let TransportErrors::ConnectionDropped { payload: other_payload, ..} = other { payload == other_payload } else { false },
+            TransportErrors::CannotReconnect   { payload, .. } => if let TransportErrors::CannotReconnect   { payload: other_payload, ..} = other { payload == other_payload } else { false },
+            TransportErrors::NotConnected      { payload, .. } => if let TransportErrors::NotConnected      { payload: other_payload }    = other { payload == other_payload } else { false },
         }
     }
 }
@@ -276,12 +276,12 @@ impl Socket {
     }
 
     /// Shows off a rather "complex" retrying & instrumentation logic, but still zero-cost when not retrying:
-    async fn send<T: Debug + PartialEq>
+    pub async fn send<T: Debug + PartialEq>
 
-                 (self: &Arc<Self>,
-                  payload: T)
+                     (self: &Arc<Self>,
+                      payload: T)
 
-                 -> Result<String, SendingErrors<T>> {
+                     -> Result<String, TransportErrors<T>> {
 
         let loggable_payload = format!("{:?}", payload);
         self.send_retry(payload)
@@ -293,7 +293,7 @@ impl Socket {
                 if !self.is_connected() {
                     if let Err(err) = self.connect_to_server().await {
                         println!("`send({loggable_payload})`: Error attempting to reconnect: {}", err);
-                        return RetryConsumerResult::Fatal { payload: (payload, retry_start), error: SendingErrors::CannotReconnect {payload: None, root_cause: err.into()} };
+                        return RetryConsumerResult::Fatal { payload: (payload, retry_start), error: TransportErrors::CannotReconnect {payload: None, root_cause: err.into()} };
                     }
                 }
                 self.send_retry(payload)
@@ -319,6 +319,13 @@ impl Socket {
                         |unmapped| unmapped)
             .into()
     }
+
+    /// Proves the `keen-retry` API is optionable... you may not recruit any of its features
+    /// (in this case, the behavior will be identical to `Result<>`)
+    // pub fn receive(&self) -> Result<&'static str, TransportErrors<&'static str>> {
+    //     self.receive_retry()
+    //        .into()     // actually, this is the only needed part to convert between the `keen-retry` API and `Result<>`
+    // }
 
     pub fn is_connected(&self) -> bool {
         self.is_connected.load(Relaxed)
@@ -357,11 +364,9 @@ impl Socket {
     }
 
     fn send_retry<T: Debug + PartialEq>
-
-                 (self: &Arc<Self>,
+                 (&self,
                   payload: T)
-
-                 -> RetryConsumerResult<(), T, SendingErrors<T>> {
+                 -> RetryConsumerResult<(), T, TransportErrors<T>> {
 
         self.send_raw(payload)
             .map_or_else(|error| match error.is_fatal() {
@@ -378,14 +383,12 @@ impl Socket {
     }
 
     fn send_raw<T: Debug + PartialEq>
-
-               (self: &Arc<Self>,
+               (&self,
                 payload: T)
-
-               -> Result<(), SendingErrors<T>> {
+               -> Result<(), TransportErrors<T>> {
 
         if !self.is_connected.load(Relaxed) {
-            Err(SendingErrors::NotConnected { payload: Some(payload) })
+            Err(TransportErrors::NotConnected { payload: Some(payload) })
         } else {
             self.sending_attempts.fetch_add(1, Relaxed);
             if self.sending_success_latch_countdown.fetch_sub(1, Relaxed) == 0 {
@@ -393,14 +396,41 @@ impl Socket {
                 Ok(())
             } else if self.sending_fatal_failure_latch_countdown.fetch_sub(1, Relaxed) == 0 {
                 self.is_connected.store(false, Relaxed);
-                Err(SendingErrors::QuotaExhausted { payload: Some(payload), root_cause: format!("You abused sending. Please don't try to send anything else today or you will be banned!").into() })
+                Err(TransportErrors::QuotaExhausted { payload: Some(payload), root_cause: format!("You abused sending. Please don't try to send anything else today or you will be banned!").into() })
             } else {
                 self.is_connected.store(false, Relaxed);
-                Err(SendingErrors::ConnectionDropped { payload: Some(payload), root_cause: format!("Socket read error (-1)").into() })
+                Err(TransportErrors::ConnectionDropped { payload: Some(payload), root_cause: format!("Socket read error (-1)").into() })
             }
         }
     }
 
+    fn receive_retry(&self)
+                    -> RetryConsumerResult<&'static str, (), TransportErrors<&'static str>> {
+
+        self.receive_raw()
+            .map_or_else(|error| match error.is_fatal() {
+                             true  => {
+                                 let (_payload, error) = error.split();
+                                 RetryConsumerResult::Fatal { payload: (), error }
+                             },
+                             false => {
+                                 let (_payload, error) = error.split();
+                                 RetryConsumerResult::Retry { payload: (), error }
+                             },
+                         },
+                         |payload| RetryConsumerResult::Ok { payload })
+    }
+
+    /// This one doesn't fail extensively... all possible retries & recoveries are already tested in connect() & send().\
+    /// Here, we are just interested into exploring the API over a function that produces results, instead of consuming it (like send() does)
+    fn receive_raw(&self)
+                  -> Result<&'static str, TransportErrors<&'static str>> {
+        if !self.is_connected.load(Relaxed) {
+            Err(TransportErrors::NotConnected { payload: None })
+        } else {
+            Ok("'Hello, Earthling!'")
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
