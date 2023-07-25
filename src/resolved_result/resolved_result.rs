@@ -87,6 +87,51 @@ ResolvedResult<OkResult,
         self
     }
 
+    pub fn map_retry_payload<NewRetryPayload,
+                             F: FnOnce(RetryPayload) -> NewRetryPayload>
+                            (self, f: F) -> ResolvedResult<OkResult, NewRetryPayload, ErrorType> {
+        match self {
+            ResolvedResult::Ok            { payload }                                                                                  => ResolvedResult::Ok            { payload },
+            ResolvedResult::Fatal         { payload, error }                                                           => ResolvedResult::Fatal         { payload, error },
+            ResolvedResult::Recovered     { payload, retry_errors }                                                      => ResolvedResult::Recovered     { payload, retry_errors },
+            ResolvedResult::GivenUp       { payload, retry_errors }                                                   => ResolvedResult::GivenUp       { payload: f(payload), retry_errors },
+            ResolvedResult::Unrecoverable { payload, retry_errors, fatal_error } if payload.is_some() => ResolvedResult::Unrecoverable { payload: Some(f(payload.unwrap())), retry_errors, fatal_error },
+            ResolvedResult::Unrecoverable { payload, retry_errors, fatal_error }                      => ResolvedResult::Unrecoverable { payload: None,                      retry_errors, fatal_error },
+        }
+    }
+
+    pub fn map_ok_result<NewOkResult,
+                         F: FnOnce(OkResult) -> NewOkResult>
+                        (self, f: F) -> ResolvedResult<NewOkResult, RetryPayload, ErrorType> {
+        match self {
+            ResolvedResult::Ok            { payload }                                                             => ResolvedResult::Ok            { payload: f(payload) },
+            ResolvedResult::Fatal         { payload, error } if payload.is_some()                 => ResolvedResult::Fatal         { payload: Some(f(payload.unwrap())), error },
+            ResolvedResult::Fatal         { payload: _, error}                                                    => ResolvedResult::Fatal         { payload: None, error },
+            ResolvedResult::Recovered     { payload, retry_errors }                                 => ResolvedResult::Recovered     { payload: f(payload), retry_errors },
+            ResolvedResult::GivenUp       { payload, retry_errors }                              => ResolvedResult::GivenUp       { payload, retry_errors },
+            ResolvedResult::Unrecoverable { payload, retry_errors, fatal_error } => ResolvedResult::Unrecoverable { payload, retry_errors, fatal_error },
+        }
+    }
+
+    pub fn map_errors<NewErrorType,
+                      FatalErrorMapFn:  FnOnce(ErrorType, Option<RetryPayload>) -> NewErrorType,
+                      RetryErrorsMapFn: FnMut(ErrorType)                        -> NewErrorType>
+
+                     (self,
+                      fatal_error_map:      FatalErrorMapFn,
+                      mut retry_errors_map: RetryErrorsMapFn)
+
+                      -> ResolvedResult<OkResult, RetryPayload, NewErrorType> {
+
+        match self {
+            ResolvedResult::Ok            { payload }                                                             => ResolvedResult::Ok            { payload },
+            ResolvedResult::Fatal         { payload, error }                                      => ResolvedResult::Fatal         { payload, error: fatal_error_map(error, None) },
+            ResolvedResult::Recovered     { payload, retry_errors }                                 => ResolvedResult::Recovered     { payload, retry_errors: retry_errors.into_iter().map(|e| retry_errors_map(e)).collect() },
+            ResolvedResult::GivenUp       { payload, retry_errors }                              => ResolvedResult::GivenUp       { payload, retry_errors: retry_errors.into_iter().map(|e| retry_errors_map(e)).collect() },
+            ResolvedResult::Unrecoverable { payload, retry_errors, fatal_error } => ResolvedResult::Unrecoverable { payload: None, retry_errors: retry_errors.into_iter().map(|e| retry_errors_map(e)).collect(), fatal_error: fatal_error_map(fatal_error, payload) },
+        }
+    }
+
 }
 
 impl<OkResult,
@@ -99,7 +144,7 @@ ResolvedResult<OkResult,
 
     fn from(result: Result<OkResult, ErrorType>) -> Self {
         match result {
-            Ok(payload) => ResolvedResult::Ok    { payload },
+            Ok(payload) => ResolvedResult::Ok     { payload },
             Err(error)   => ResolvedResult::Fatal { payload: None, error }
         }
     }
@@ -115,10 +160,10 @@ ResolvedResult<OriginalPayload,
 
     fn into(self) -> Result<OriginalPayload, ErrorType> {
         match self {
-            ResolvedResult::Ok { payload } => Ok(payload),
-            ResolvedResult::Fatal { payload, error } => Err(error),
-            ResolvedResult::Recovered { payload, retry_errors } => Ok(payload),
-            ResolvedResult::GivenUp { payload, mut retry_errors } => Err(retry_errors.pop().unwrap()),
+            ResolvedResult::Ok { payload }                                                                   => Ok(payload),
+            ResolvedResult::Fatal { payload, error }                                         => Err(error),
+            ResolvedResult::Recovered { payload, retry_errors: _ }                                           => Ok(payload),
+            ResolvedResult::GivenUp { payload, mut retry_errors }                                => Err(retry_errors.pop().unwrap()),
             ResolvedResult::Unrecoverable { payload, retry_errors, fatal_error } => Err(fatal_error),
         }
     }

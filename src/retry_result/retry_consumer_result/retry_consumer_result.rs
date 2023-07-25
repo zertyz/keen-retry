@@ -3,7 +3,8 @@
 
 use crate::KeenRetryExecutor;
 
-/// Wrapper for the return type of fallible & retryable functions -- a replacement for `Result<OkPayload, ErrorType>`
+/// Wrapper for the return type of fallible & retryable functions -- a replacement for `Result<OkPayload, ErrorType>`.\
+/// Considering zero-copy, both `Retry` & `Fatal` variants will contain the original input payload -- which is consumed by an `Ok` operation.
 pub enum RetryConsumerResult<OkResult,
                              RetryPayload,
                              ErrorType> {
@@ -96,7 +97,7 @@ RetryConsumerResult<OkResult,
     }
 
     /// Upgrades this [RetryResult] into a [KeenRetryExecutor], which will, on its turn, be upgraded to [ResolvedResult], containing the final results of the retryable operation
-    pub fn retry_with<RetryFn: FnMut(RetryPayload) -> Result<RetryConsumerResult<OkResult, RetryPayload, ErrorType>, ErrorType>>
+    pub fn retry_with<RetryFn: FnMut(RetryPayload) -> RetryConsumerResult<OkResult, RetryPayload, ErrorType>>
                      (self, retry_operation: RetryFn)
                      -> KeenRetryExecutor<OkResult, RetryPayload, ErrorType, RetryFn> {
 

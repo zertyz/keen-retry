@@ -9,7 +9,7 @@ use crate::resolved_result::ResolvedResult;
 pub enum KeenRetryExecutor<OkResult,
                            RetryPayload,
                            ErrorType,
-                           RetryFn: FnMut(RetryPayload) -> Result<RetryConsumerResult<OkResult, RetryPayload, ErrorType>, ErrorType>> {
+                           RetryFn: FnMut(RetryPayload) -> RetryConsumerResult<OkResult, RetryPayload, ErrorType>> {
 
     /// Indicates no retrying is needed as the operation completed on the initial attempt
     Resolved(Result<OkResult, ErrorType>),
@@ -26,7 +26,7 @@ pub enum KeenRetryExecutor<OkResult,
 impl<OkResult,
      RetryPayload,
      ErrorType,
-     RetryFn: FnMut(RetryPayload) -> Result<RetryConsumerResult<OkResult, RetryPayload, ErrorType>, ErrorType>>
+     RetryFn: FnMut(RetryPayload) -> RetryConsumerResult<OkResult, RetryPayload, ErrorType>>
 
 KeenRetryExecutor<OkResult,
                   RetryPayload,
@@ -55,10 +55,9 @@ KeenRetryExecutor<OkResult,
                     std::thread::sleep(delay);
                     let new_retry_result = retry_operation(retry_payload);
                     retry_payload = match new_retry_result {
-                        Ok(RetryConsumerResult::Ok    { payload })                       => return ResolvedResult::Recovered { payload, retry_errors },
-                        Ok(RetryConsumerResult::Retry { payload, error }) => { retry_errors.push(error); payload },
-                        Ok(RetryConsumerResult::Fatal { payload, error }) => return ResolvedResult::Unrecoverable { payload: Some(payload), retry_errors, fatal_error: error },
-                        Err(fatal_error)                                                => return ResolvedResult::Unrecoverable { payload: None,         retry_errors, fatal_error },
+                        RetryConsumerResult::Ok    { payload }                    => return ResolvedResult::Recovered { payload, retry_errors },
+                        RetryConsumerResult::Retry { payload, error } => { retry_errors.push(error); payload },
+                        RetryConsumerResult::Fatal { payload, error } => return ResolvedResult::Unrecoverable { payload: Some(payload), retry_errors, fatal_error: error },
                     }
                 }
                 ResolvedResult::GivenUp { payload: retry_payload, retry_errors }
