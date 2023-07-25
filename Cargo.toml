@@ -7,10 +7,11 @@ edition = "2021"
 
 [workspace]
 
-[dependencies]
 
-# might it be a good idea to use the `retry` crate here, giving me those nice time-based retrying mechanisms?
-# to use `retry`, I'd do it when calling the operation... and map its response to `retry`s OperationResult<Ok, Retryable, Fatal>
+[dependencies]
+futures = "0.3"
+tokio = { version = "1", features = ["full"] }
+
 
 [dev-dependencies]
 thiserror = "1.0"

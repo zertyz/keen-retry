@@ -3,8 +3,8 @@
 mod retry_result;
 pub use retry_result::*;
 
-mod keen_retry_executor;
-pub use keen_retry_executor::*;
+mod keen_retry_executors;
+pub use keen_retry_executors::*;
 
 mod resolved_result;
 pub use retry_result::*;

@@ -1,7 +1,9 @@
 //! Resting place for [RetryConsumerResult]
 
 
-use crate::KeenRetryExecutor;
+use std::future::Future;
+use crate::keen_retry_async_executor::KeenRetryAsyncExecutor;
+use crate::keen_retry_executor::KeenRetryExecutor;
 
 /// Wrapper for the return type of fallible & retryable functions -- a replacement for `Result<OkPayload, ErrorType>`.\
 /// Considering zero-copy, both `Retry` & `Fatal` variants will contain the original input payload -- which is consumed by an `Ok` operation.
@@ -105,6 +107,19 @@ RetryConsumerResult<OkResult,
             RetryConsumerResult::Ok    { payload }                    => KeenRetryExecutor::from_resolved(Ok(payload)),
             RetryConsumerResult::Fatal { payload, error } => KeenRetryExecutor::from_resolved(Err(error)),
             RetryConsumerResult::Retry { payload, error } => KeenRetryExecutor::new(payload, retry_operation, error),
+        }
+    }
+
+    /// Upgrades this [RetryResult] into a [KeenRetryExecutor], which will, on its turn, be upgraded to [ResolvedResult], containing the final results of the retryable operation
+    pub fn retry_with_async<AsyncRetryFn: FnMut(RetryPayload) -> OutputFuture,
+                            OutputFuture: Future<Output=RetryConsumerResult<OkResult, RetryPayload, ErrorType>>>
+                           (self, retry_operation: AsyncRetryFn)
+                           -> KeenRetryAsyncExecutor<OkResult, RetryPayload, ErrorType, AsyncRetryFn, OutputFuture> {
+
+        match self {
+            RetryConsumerResult::Ok    { payload }                    => KeenRetryAsyncExecutor::from_resolved(Ok(payload)),
+            RetryConsumerResult::Fatal { payload, error } => KeenRetryAsyncExecutor::from_resolved(Err(error)),
+            RetryConsumerResult::Retry { payload, error } => KeenRetryAsyncExecutor::new(payload, retry_operation, error),
         }
     }
 
