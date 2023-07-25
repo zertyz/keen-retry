@@ -2,6 +2,7 @@
 //! Keep this in sync with ../keen_retry_executor.rs
 
 
+use std::fmt::Debug;
 use std::future::Future;
 use std::time::Duration;
 use crate::{RetryConsumerResult, RetryResult};
@@ -11,7 +12,7 @@ use crate::resolved_result::ResolvedResult;
 pub enum KeenRetryAsyncExecutor<ReportedInput,
                                 OriginalInput,
                                 Output,
-                                ErrorType,
+                                ErrorType:    Debug,
                                 AsyncRetryFn: FnMut(OriginalInput) -> OutputFuture,
                                 OutputFuture: Future<Output=RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>> {
 
@@ -39,7 +40,7 @@ pub enum KeenRetryAsyncExecutor<ReportedInput,
 impl<ReportedInput,
      OriginalInput,
      Output,
-     ErrorType,
+     ErrorType:    Debug,
      AsyncRetryFn: FnMut(OriginalInput) -> OutputFuture,
      OutputFuture: Future<Output=RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>>
 

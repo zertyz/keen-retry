@@ -1,6 +1,7 @@
 //! Resting place for [RetryResult]
 
 
+use std::fmt::Debug;
 use std::future::Future;
 use crate::keen_retry_async_executor::KeenRetryAsyncExecutor;
 use crate::keen_retry_executor::KeenRetryExecutor;
@@ -12,7 +13,7 @@ use crate::keen_retry_executor::KeenRetryExecutor;
 pub enum RetryResult<ReportedInput,
                      OriginalInput,
                      Output,
-                     ErrorType> {
+                     ErrorType: Debug> {
     Ok {
         reported_input: ReportedInput,
         output:         Output,
@@ -32,7 +33,7 @@ pub enum RetryResult<ReportedInput,
 impl<ReportedInput,
      OriginalInput,
      Output,
-     ErrorType>
+     ErrorType: Debug>
 RetryResult<ReportedInput,
             OriginalInput,
             Output,

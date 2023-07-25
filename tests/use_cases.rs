@@ -271,7 +271,7 @@ impl Socket {
             .retry_with_async(|_| cloned_self.connect_to_server_retry())
             .with_delays(RETRY_DELAY_MILLIS.into_iter().map(|millis| Duration::from_millis(millis)))
             .await
-            .inspect_recovered(|_, _, retry_errors_list| println!("## `connect_to_server()`: successfully connected after retrying {} times (failed attempts: {:?})", retry_errors_list.len(), retry_errors_list))
+            .inspect_recovered(|_, _, loggable_retry_errors, retry_errors_list| println!("## `connect_to_server()`: successfully connected after retrying {} times (failed attempts: [{loggable_retry_errors}])", retry_errors_list.len()))
             .into()
     }
 
@@ -302,12 +302,12 @@ impl Socket {
             })
             .with_delays(RETRY_DELAY_MILLIS.into_iter().map(|millis| Duration::from_millis(millis)))
             .await
-            .inspect_given_up(|(loggable_payload, payload, retry_start), retry_errors_list| println!("## `send({:?})` FAILED after exhausting all {} retrying attempts in {:?} ({:?})",  payload, retry_errors_list.len(), retry_start.elapsed(), retry_errors_list))
-            .inspect_unrecoverable(|payload_triplet, retry_errors_list, fatal_error| payload_triplet.as_ref().is_some_and(|(_loggable_payload, payload, retry_start)| {
-                println!("## `send({:?})`: fatal error after trying {} time(s) in {:?}: {:?}", payload, retry_errors_list.len()+1, retry_start.elapsed().unwrap(), fatal_error);
+            .inspect_given_up(|(loggable_payload, payload, retry_start), loggable_retry_errors, retry_errors_list| println!("## `send({:?})` FAILED after exhausting all {} retrying attempts in {:?} [{loggable_retry_errors}]",  payload, retry_errors_list.len(), retry_start.elapsed()))
+            .inspect_unrecoverable(|payload_triplet, loggable_retry_errors, retry_errors_list, fatal_error| payload_triplet.as_ref().is_some_and(|(_loggable_payload, payload, retry_start)| {
+                println!("## `send({:?})`: fatal error after trying {} time(s) in {:?}: {:?} -- prior to that fatal failure, these retry attempts also failed: [{loggable_retry_errors}]", payload, retry_errors_list.len()+1, retry_start.elapsed().unwrap(), fatal_error);
                 true
             }))
-            .inspect_recovered(|(loggable_payload, duration), _output, retry_errors_list| println!("## `send({loggable_payload})`: succeeded after trying {} time(s) in {:?}: {:?}", retry_errors_list.len()+1, duration, retry_errors_list))
+            .inspect_recovered(|(loggable_payload, duration), _output, loggable_retry_errors, retry_errors_list| println!("## `send({loggable_payload})`: succeeded after trying {} time(s) in {:?}: [{loggable_retry_errors}]", retry_errors_list.len()+1, duration))
             // remaps the input types back to their originals, simulating we are interested in only part of it (that other part was usefull only for instrumentation)
             .map_unrecoverable_input(|(loggable_payload, payload, retry_start)| payload)
             .map_reported_input(|loggable_payload_and_duration| loggable_payload_and_duration.map(|v| v.0))

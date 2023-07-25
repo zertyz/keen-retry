@@ -1,12 +1,15 @@
 //! Resting place for [ResolvedResult]
 
 
+use std::collections::BTreeMap;
+use std::fmt::Debug;
+
 /// Contains all possibilities for finished retryable operations -- conversible to `Result<>` --
 /// and some nice facilities for instrumentation (like building a succinct report of the retry errors)
 pub enum ResolvedResult<ReportedInput,
                         OriginalInput,
                         Output,
-                        ErrorType> {
+                        ErrorType: Debug> {
     Ok {
         reported_input: Option<ReportedInput>,
         output:         Output,
@@ -39,7 +42,7 @@ pub enum ResolvedResult<ReportedInput,
 impl<ReportedInput,
      OriginalInput,
      Output,
-     ErrorType>
+     ErrorType: Debug>
 
 ResolvedResult<ReportedInput,
                OriginalInput,
@@ -73,28 +76,28 @@ ResolvedResult<ReportedInput,
     }
 
     pub fn inspect_recovered<IgnoredReturn,
-                             F: FnOnce(&ReportedInput, &Output, &Vec<ErrorType>) -> IgnoredReturn>
+                             F: FnOnce(&ReportedInput, &Output, /*loggable_retry_errors: */String, &Vec<ErrorType>) -> IgnoredReturn>
                             (self, f: F) -> Self {
         if let Self::Recovered { ref reported_input, ref output, ref retry_errors } = self {
-            f(reported_input, output, retry_errors);
+            f(reported_input, output, loggable_retry_errors(&retry_errors), retry_errors);
         }
         self
     }
 
     pub fn inspect_given_up<IgnoredReturn,
-                            F: FnOnce(&OriginalInput, &Vec<ErrorType>) -> IgnoredReturn>
+                            F: FnOnce(&OriginalInput, /*loggable_retry_errors: */String, &Vec<ErrorType>) -> IgnoredReturn>
                            (self, f: F) -> Self {
         if let Self::GivenUp { ref input, ref retry_errors } = self {
-            f(input, retry_errors);
+            f(input, loggable_retry_errors(&retry_errors), retry_errors);
         }
         self
     }
 
     pub fn inspect_unrecoverable<IgnoredReturn,
-                                 F: FnOnce(&Option<OriginalInput>, &Vec<ErrorType>, &ErrorType) -> IgnoredReturn>
+                                 F: FnOnce(&Option<OriginalInput>, /*loggable_retry_errors: */String, &Vec<ErrorType>, &ErrorType) -> IgnoredReturn>
                                 (self, f: F) -> Self {
         if let Self::Unrecoverable { ref input, ref retry_errors, ref fatal_error } = self {
-            f(input, retry_errors, fatal_error);
+            f(input, loggable_retry_errors(&retry_errors), retry_errors, fatal_error);
         }
         self
     }
@@ -144,7 +147,7 @@ ResolvedResult<ReportedInput,
         }
     }
 
-    pub fn map_errors<NewErrorType,
+    pub fn map_errors<NewErrorType:     Debug,
                       FatalErrorMapFn:  FnOnce(ErrorType, Option<OriginalInput>) -> NewErrorType,
                       RetryErrorsMapFn: FnMut(ErrorType)                         -> NewErrorType>
 
@@ -168,7 +171,7 @@ ResolvedResult<ReportedInput,
 impl<ReportedInput,
      OriginalInput,
      Output,
-     ErrorType>
+     ErrorType: Debug>
 Into<Result<Output, ErrorType>> for
 ResolvedResult<ReportedInput,
                OriginalInput,
@@ -185,3 +188,17 @@ ResolvedResult<ReportedInput,
         }
     }
 }
+
+/// builds an as-short-as-possible list of `retry_errors` occurrences (out of order)
+fn loggable_retry_errors<ErrorType: Debug>(retry_errors: &Vec<ErrorType>) -> String {
+    let mut counts = BTreeMap::<String, u32>::new();
+    for error in retry_errors {
+        let error_string = format!("{:?}", error);
+        *counts.entry(error_string).or_insert(0) += 1;
+    }
+    counts.into_iter()
+        .map(|(error, count)| format!("{count}x: '{error}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+

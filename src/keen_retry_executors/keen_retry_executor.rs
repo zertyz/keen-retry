@@ -2,6 +2,7 @@
 // //! Keep this in sync with ../keen_retry_async_executor.rs
 
 
+use std::fmt::Debug;
 use std::time::Duration;
 use crate::{RetryConsumerResult, RetryResult};
 use crate::resolved_result::ResolvedResult;
@@ -10,8 +11,8 @@ use crate::resolved_result::ResolvedResult;
 pub enum KeenRetryExecutor<ReportedInput,
                            OriginalInput,
                            Output,
-                           ErrorType,
-                           RetryFn: FnMut(OriginalInput) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType>> {
+                           ErrorType: Debug,
+                           RetryFn:   FnMut(OriginalInput) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType>> {
 
 
     /// Indicates no retrying is needed as the operation completed successfully on the initial attempt
@@ -38,8 +39,8 @@ pub enum KeenRetryExecutor<ReportedInput,
 impl<ReportedInput,
      OriginalInput,
      Output,
-     ErrorType,
-     RetryFn: FnMut(OriginalInput) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>
+     ErrorType: Debug,
+     RetryFn:   FnMut(OriginalInput) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>
 
 
 KeenRetryExecutor<ReportedInput,
