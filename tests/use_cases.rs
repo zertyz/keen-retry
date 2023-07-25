@@ -86,8 +86,8 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     let case_name = "2) Failed fatably at the first shot";
     println!("\n{}:", case_name);
     let to_send = || MyPayload { message: case_name };
-    let expected = Err(TransportErrors::QuotaExhausted { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
-    let mut socket = Socket::new(13, 1, 11, 13, 10, 1);
+    let expected = Err(TransportErrors::QuotaExhausted { payload: None, root_cause: format!("any root cause....").into() });
+    let mut socket = Socket::new(13, 0, 11, 13, 10, 1);
     socket.connect_to_server().await?;
     let result = socket.send(to_send()).await;
     assert_eq!(result, expected, "In '{}'", case_name);
@@ -96,7 +96,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     let case_name = "3.1) Recovered from failure on the 10th attempt (connection was initially OK)";
     println!("\n{}:", case_name);
     let expected = Ok(format!("{:?}", MyPayload { message: case_name }));
-    let mut socket = Socket::new(13, 1, 999, 13, 10, 11);
+    let mut socket = Socket::new(13, 0, 999, 13, 10, 11);
     socket.connect_to_server().await?;
     let result = socket.send(MyPayload { message: case_name }).await;
     assert_eq!(result, expected, "In '{}'", case_name);
@@ -271,7 +271,7 @@ impl Socket {
             .retry_with_async(|_| cloned_self.connect_to_server_retry())
             .with_delays(RETRY_DELAY_MILLIS.into_iter().map(|millis| Duration::from_millis(millis)))
             .await
-            .inspect_recovered(|_, _, retry_errors_list| println!("connect_to_server(): successfully connected after retrying {} times (failed attempts: {:?})", retry_errors_list.len(), retry_errors_list))
+            .inspect_recovered(|_, _, retry_errors_list| println!("## `connect_to_server()`: successfully connected after retrying {} times (failed attempts: {:?})", retry_errors_list.len(), retry_errors_list))
             .into()
     }
 
@@ -285,34 +285,34 @@ impl Socket {
 
         let loggable_payload = format!("{:?}", payload);
         self.send_retry(payload)
-            .map_ok(|_,_| ( (loggable_payload, Duration::ZERO), () ))
-            .inspect_fatal(|payload, fatal_err| println!("`send()`: fatal error (won't retry): {:?}", fatal_err))
-            .map_input(|payload| ( (payload, SystemTime::now() )) )
-            .retry_with_async(|(payload, retry_start)| async move {
-                let loggable_payload = format!("{:?}", &payload);
+            .inspect_fatal(|payload, fatal_err| println!("## `send()`: fatal error (won't retry): {:?}", fatal_err))
+            .map_ok(|_, _| ((loggable_payload, Duration::ZERO), () ) )
+            .map_input(|payload| ( /*loggable_payload:*/format!("{:?}", &payload), payload, SystemTime::now() ) )
+            .retry_with_async(|(loggable_payload, payload, retry_start)| async move {
                 if !self.is_connected() {
                     if let Err(err) = self.connect_to_server().await {
-                        println!("`send({loggable_payload})`: Error attempting to reconnect: {}", err);
-                        return RetryConsumerResult::Fatal { input: (payload, retry_start), error: TransportErrors::CannotReconnect {payload: None, root_cause: err.into()} };
+                        println!("## `send({loggable_payload})`: Error attempting to reconnect: {}", err);
+                        return RetryConsumerResult::Fatal { input: (loggable_payload, payload, retry_start), error: TransportErrors::CannotReconnect {payload: None, root_cause: err.into()} };
                     }
                 }
                 self.send_retry(payload)
-                    .map_ok(|_,_| ( (loggable_payload, retry_start.elapsed().unwrap()), () ))
-                    .map_input(|payload| (payload, retry_start) )
+                    // notice the retry operation must map to the same types as the original operation:
+                    .map_ok(|_, _| ((loggable_payload.clone(), retry_start.elapsed().unwrap()), () ))
+                    .map_input(|payload| (loggable_payload, payload, retry_start) )
             })
             .with_delays(RETRY_DELAY_MILLIS.into_iter().map(|millis| Duration::from_millis(millis)))
             .await
-            .inspect_given_up(|(payload, retry_start), retry_errors_list| println!("`send({:?})` FAILED after exhausting all {} retrying attempts in {:?} ({:?})",  payload, retry_errors_list.len(), retry_start.elapsed(), retry_errors_list))
-            .inspect_unrecoverable(|payload_and_retry_start, retry_errors_list, fatal_error| {
-                let (payload, retry_start) = payload_and_retry_start.as_ref().map_or_else(|| (None, None), |v| (Some(&v.0), Some(v.1.elapsed().unwrap())));
-                println!("`send({:?})`: fatal error after trying {} time(s) in {:?}: {:?}", payload, retry_errors_list.len()+1, retry_start, fatal_error)
-            })
-            .inspect_recovered(|(loggable_payload, duration), _output, retry_errors_list| println!("send({loggable_payload}): succeeded after trying {} time(s) in {:?}: {:?}", retry_errors_list.len()+1, duration, retry_errors_list))
+            .inspect_given_up(|(loggable_payload, payload, retry_start), retry_errors_list| println!("## `send({:?})` FAILED after exhausting all {} retrying attempts in {:?} ({:?})",  payload, retry_errors_list.len(), retry_start.elapsed(), retry_errors_list))
+            .inspect_unrecoverable(|payload_triplet, retry_errors_list, fatal_error| payload_triplet.as_ref().is_some_and(|(_loggable_payload, payload, retry_start)| {
+                println!("## `send({:?})`: fatal error after trying {} time(s) in {:?}: {:?}", payload, retry_errors_list.len()+1, retry_start.elapsed().unwrap(), fatal_error);
+                true
+            }))
+            .inspect_recovered(|(loggable_payload, duration), _output, retry_errors_list| println!("## `send({loggable_payload})`: succeeded after trying {} time(s) in {:?}: {:?}", retry_errors_list.len()+1, duration, retry_errors_list))
             // remaps the input types back to their originals, simulating we are interested in only part of it (that other part was usefull only for instrumentation)
-            .map_retry_payload(|(loggable_payload, retry_start)| loggable_payload)
+            .map_unrecoverable_input(|(loggable_payload, payload, retry_start)| payload)
             .map_reported_input(|loggable_payload_and_duration| loggable_payload_and_duration.map(|v| v.0))
             // demonstrates how to map the reported input (`loggable_payload` in our case) into the output, so it will be available at final `Ok(loggable_payload)` result
-            .map_reported_input_and_output(|reported_input, output| (output, reported_input.unwrap_or("__BUG!!__MISSING__REPORTED_INPUT__".to_string())))
+            .map_reported_input_and_output(|reported_input, output| (output, reported_input.unwrap_or("<<absent loggable_payload>>".to_string())))
             // go an extra mile to demonstrate how to place back the payloads of failed requests in `Option<>` field
             .map_errors(|mut fatal_error, payload| {
                             fatal_error.for_payload(|mut_payload| payload.and_then(|payload| mut_payload.replace(payload)));
@@ -349,14 +349,14 @@ impl Socket {
     /// Simulates a real connection, failing according to the configuration
     async fn connect_to_server_raw(self: &Arc<Self>) -> Result<(), ConnectionErrors> {
         self.connection_attempts.fetch_add(1, Relaxed);
-        if self.connection_success_latch_countdown.fetch_sub(1, Relaxed) == 0 {
+        if self.connection_success_latch_countdown.fetch_sub(1, Relaxed) <= 1 {
             self.connection_fatal_failure_latch_countdown.fetch_sub(1, Relaxed);
             self.is_connected.store(true, Relaxed);
             Ok(())
-        } else if self.connection_fatal_failure_latch_countdown.fetch_sub(1, Relaxed) == 0 {
+        } else if self.connection_fatal_failure_latch_countdown.fetch_sub(1, Relaxed) <= 1 {
             self.is_connected.store(false, Relaxed);
             Err(ConnectionErrors::WrongCredentials)
-        } else if self.connection_success_latch_countdown.load(Relaxed) < 0 {
+        } else if self.connection_success_latch_countdown.load(Relaxed) <= 0 {
             self.is_connected.store(true, Relaxed);
             Ok(())
         } else {
@@ -393,10 +393,10 @@ impl Socket {
             Err(TransportErrors::NotConnected { payload: Some(payload) })
         } else {
             self.sending_attempts.fetch_add(1, Relaxed);
-            if self.sending_success_latch_countdown.fetch_sub(1, Relaxed) == 0 {
+            if self.sending_success_latch_countdown.fetch_sub(1, Relaxed) <= 1 {
                 self.sending_fatal_failure_latch_countdown.fetch_sub(1, Relaxed);
                 Ok(())
-            } else if self.sending_fatal_failure_latch_countdown.fetch_sub(1, Relaxed) == 0 {
+            } else if self.sending_fatal_failure_latch_countdown.fetch_sub(1, Relaxed) <= 1 {
                 self.is_connected.store(false, Relaxed);
                 Err(TransportErrors::QuotaExhausted { payload: Some(payload), root_cause: format!("You abused sending. Please don't try to send anything else today or you will be banned!").into() })
             } else {

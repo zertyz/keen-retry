@@ -59,8 +59,8 @@ RetryResult<ReportedInput,
     pub fn inspect_fatal<IgnoredReturn,
                          F: FnOnce(&OriginalInput, &ErrorType) -> IgnoredReturn>
                         (self, f: F) -> Self {
-        if let Self::Fatal { input: ref payload, ref error } = self {
-            f(payload, error);
+        if let Self::Fatal { ref input, ref error } = self {
+            f(input, error);
         }
         self
     }
@@ -114,8 +114,8 @@ RetryResult<ReportedInput,
                      -> KeenRetryExecutor<ReportedInput, OriginalInput, Output, ErrorType, RetryFn> {
 
         match self {
-            RetryResult::Ok    { reported_input, output } => KeenRetryExecutor::from_resolved(Ok(output)),
-            RetryResult::Fatal { input, error }          => KeenRetryExecutor::from_resolved(Err(error)),
+            RetryResult::Ok    { reported_input, output } => KeenRetryExecutor::from_ok_result(reported_input, output),
+            RetryResult::Fatal { input, error }          => KeenRetryExecutor::from_err_result(input, error),
             RetryResult::Retry { input, error }          => KeenRetryExecutor::new(input, retry_operation, error),
         }
     }
@@ -128,8 +128,8 @@ RetryResult<ReportedInput,
                            -> KeenRetryAsyncExecutor<ReportedInput, OriginalInput, Output, ErrorType, AsyncRetryFn, OutputFuture> {
 
         match self {
-            RetryResult::Ok    { reported_input, output } => KeenRetryAsyncExecutor::from_resolved(Ok(output)),
-            RetryResult::Fatal { input, error }          => KeenRetryAsyncExecutor::from_resolved(Err(error)),
+            RetryResult::Ok    { reported_input, output } => KeenRetryAsyncExecutor::from_ok_result(reported_input, output),
+            RetryResult::Fatal { input, error }          => KeenRetryAsyncExecutor::from_err_result(input, error),
             RetryResult::Retry { input, error }          => KeenRetryAsyncExecutor::new(input, retry_operation, error),
         }
     }

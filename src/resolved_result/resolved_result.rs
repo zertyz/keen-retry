@@ -13,8 +13,8 @@ pub enum ResolvedResult<ReportedInput,
     },
 
     Fatal {
-        reported_input: Option<ReportedInput>,
-        error:          ErrorType,
+        input: Option<OriginalInput>,
+        error: ErrorType,
     },
 
     Recovered {
@@ -46,6 +46,14 @@ ResolvedResult<ReportedInput,
                Output,
                ErrorType> {
 
+    pub fn from_ok_result(reported_input: ReportedInput, output: Output) -> Self {
+        ResolvedResult::Ok { reported_input: Some(reported_input), output }
+    }
+
+    pub fn from_err_result(original_input: OriginalInput, error: ErrorType) -> Self {
+        ResolvedResult::Fatal { input: Some(original_input), error }
+    }
+
     pub fn inspect_ok<IgnoredReturn,
                       F: FnOnce(&Option<ReportedInput>, &Output) -> IgnoredReturn>
                      (self, f: F) -> Self {
@@ -56,9 +64,9 @@ ResolvedResult<ReportedInput,
     }
 
     pub fn inspect_fatal<IgnoredReturn,
-                         F: FnOnce(&Option<ReportedInput>, &ErrorType) -> IgnoredReturn>
+                         F: FnOnce(&Option<OriginalInput>, &ErrorType) -> IgnoredReturn>
                         (self, f: F) -> Self {
-        if let Self::Fatal { reported_input: ref input, ref error } = self {
+        if let Self::Fatal { ref input, ref error } = self {
             f(input, error);
         }
         self
@@ -91,12 +99,12 @@ ResolvedResult<ReportedInput,
         self
     }
 
-    pub fn map_retry_payload<NewOriginalInput,
+    pub fn map_unrecoverable_input<NewOriginalInput,
                              F: FnOnce(OriginalInput) -> NewOriginalInput>
                             (self, f: F) -> ResolvedResult<ReportedInput, NewOriginalInput, Output, ErrorType> {
         match self {
             ResolvedResult::Ok            { reported_input, output }                                             => ResolvedResult::Ok            { reported_input, output },
-            ResolvedResult::Fatal         { reported_input: input, error }                                                     => ResolvedResult::Fatal         { reported_input: input, error },
+            ResolvedResult::Fatal         { input, error }                                                      => ResolvedResult::Fatal         { input: Some(f(input.unwrap())), error },
             ResolvedResult::Recovered     { reported_input, output, retry_errors }                       => ResolvedResult::Recovered     { reported_input, output, retry_errors },
             ResolvedResult::GivenUp       { input, retry_errors }                                                 => ResolvedResult::GivenUp       { input: f(input), retry_errors },
             ResolvedResult::Unrecoverable { input, retry_errors, fatal_error } if input.is_some() => ResolvedResult::Unrecoverable { input: Some(f(input.unwrap())), retry_errors, fatal_error },
@@ -109,8 +117,7 @@ ResolvedResult<ReportedInput,
                              (self, f: F) -> ResolvedResult<NewReportedInput, OriginalInput, Output, ErrorType> {
         match self {
             ResolvedResult::Ok            { reported_input, output }                              => ResolvedResult::Ok            { reported_input: f(reported_input), output },
-            ResolvedResult::Fatal         { reported_input, error } if reported_input.is_some() => ResolvedResult::Fatal         { reported_input: f(reported_input), error },
-            ResolvedResult::Fatal         { reported_input: _, error}                                              => ResolvedResult::Fatal         { reported_input: None, error },
+            ResolvedResult::Fatal         { input, error}                                        => ResolvedResult::Fatal         { input, error },
             ResolvedResult::Recovered     { reported_input, output, retry_errors }        => ResolvedResult::Recovered     { reported_input: f(Some(reported_input)).unwrap(), output, retry_errors },
             ResolvedResult::GivenUp       { input, retry_errors }                                  => ResolvedResult::GivenUp       { input, retry_errors },
             ResolvedResult::Unrecoverable { input, retry_errors, fatal_error }     => ResolvedResult::Unrecoverable { input, retry_errors, fatal_error },
@@ -122,10 +129,9 @@ ResolvedResult<ReportedInput,
                                          F: FnOnce(Option<ReportedInput>, Option<Output>) -> (Option<NewReportedInput>, NewOutput)>
                                         (self, f: F) -> ResolvedResult<NewReportedInput, OriginalInput, NewOutput, ErrorType> {
         match self {
-            ResolvedResult::Fatal         { reported_input, error } if reported_input.is_some() => ResolvedResult::Fatal         { reported_input: f(reported_input, None).0, error },
-            ResolvedResult::Fatal         { reported_input: _, error}                                              => ResolvedResult::Fatal         { reported_input: None, error },
-            ResolvedResult::GivenUp       { input, retry_errors }                                  => ResolvedResult::GivenUp       { input, retry_errors },
-            ResolvedResult::Unrecoverable { input, retry_errors, fatal_error }     => ResolvedResult::Unrecoverable { input, retry_errors, fatal_error },
+            ResolvedResult::Fatal         { input, error}                                    => ResolvedResult::Fatal         { input, error },
+            ResolvedResult::GivenUp       { input, retry_errors }                              => ResolvedResult::GivenUp       { input, retry_errors },
+            ResolvedResult::Unrecoverable { input, retry_errors, fatal_error } => ResolvedResult::Unrecoverable { input, retry_errors, fatal_error },
 
             ResolvedResult::Recovered     { reported_input, output, retry_errors } => {
                 let (reported_input, output) = f(Some(reported_input), Some(output));
@@ -150,31 +156,13 @@ ResolvedResult<ReportedInput,
 
         match self {
             ResolvedResult::Ok            { reported_input, output }                          => ResolvedResult::Ok            { reported_input, output },
-            ResolvedResult::Fatal         { reported_input, error }                         => ResolvedResult::Fatal         { reported_input, error: fatal_error_map(error, None) },
+            ResolvedResult::Fatal         { input, error }                                   => ResolvedResult::Fatal         { input, error: fatal_error_map(error, None) },
             ResolvedResult::Recovered     { reported_input, output, retry_errors }    => ResolvedResult::Recovered     { reported_input, output, retry_errors: retry_errors.into_iter().map(|e| retry_errors_map(e)).collect() },
             ResolvedResult::GivenUp       { input, retry_errors }                              => ResolvedResult::GivenUp       { input, retry_errors: retry_errors.into_iter().map(|e| retry_errors_map(e)).collect() },
             ResolvedResult::Unrecoverable { input, retry_errors, fatal_error } => ResolvedResult::Unrecoverable { input: None, retry_errors: retry_errors.into_iter().map(|e| retry_errors_map(e)).collect(), fatal_error: fatal_error_map(fatal_error, input) },
         }
     }
 
-}
-
-impl<ReportedInput,
-     OriginalInput,
-     Output,
-     ErrorType>
-From<Result<Output, ErrorType>> for
-ResolvedResult<ReportedInput,
-               OriginalInput,
-               Output,
-               ErrorType> {
-
-    fn from(result: Result<Output, ErrorType>) -> Self {
-        match result {
-            Ok(output)   => ResolvedResult::Ok    { reported_input: None, output },
-            Err(error) => ResolvedResult::Fatal { reported_input: None, error }
-        }
-    }
 }
 
 impl<ReportedInput,
@@ -189,8 +177,8 @@ ResolvedResult<ReportedInput,
 
     fn into(self) -> Result<Output, ErrorType> {
         match self {
-            ResolvedResult::Ok { reported_input, output }                                           => Ok(output),
-            ResolvedResult::Fatal { reported_input: input, error }                                          => Err(error),
+            ResolvedResult::Ok { reported_input, output }                                     => Ok(output),
+            ResolvedResult::Fatal { input: input, error }                                    => Err(error),
             ResolvedResult::Recovered { reported_input, output, retry_errors: _ }                   => Ok(output),
             ResolvedResult::GivenUp { input, mut retry_errors }                                => Err(retry_errors.pop().unwrap()),
             ResolvedResult::Unrecoverable { input, retry_errors, fatal_error } => Err(fatal_error),
