@@ -142,6 +142,24 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     Ok(())
 }
 
+/// Demonstrates that we may not care if a function uses the `keen-retry` API... it will still behave like `Result<>`
+#[tokio::test]
+async fn optable_api() -> Result<(), StdErrorType> {
+    let case_name = "1) Ok operation";
+    println!("\n{}:", case_name);
+    let mut socket = Socket::new(13, 1, 11, 13, 1, 2);
+    socket.connect_to_server().await?;
+    assert!(socket.receive().is_ok(), "Operation errored when it shouldn't at {case_name}");
+
+    let case_name = "2) Err operation";
+    println!("\n{}:", case_name);
+    let mut socket = Socket::new(13, 1, 11, 13, 1, 2);
+    assert!(socket.receive().is_err(), "Operation didn't errored as it should at {case_name}");
+
+    Ok(())
+}
+
+
 #[derive(Error, Debug, PartialEq)]
 enum ConnectionErrors {
     /// A fatal error
@@ -270,7 +288,7 @@ impl Socket {
         let cloned_self = Arc::clone(&self);
         self.connect_to_server_retry().await
             .retry_with_async(|_| cloned_self.connect_to_server_retry())
-            .with_delays(RETRY_DELAY_MILLIS.into_iter().map(|millis| Duration::from_millis(millis)))
+            .with_delays((10..=130).step_by(10).map(|millis| Duration::from_millis(millis)))
             .await
             .inspect_recovered(|_, _, loggable_retry_errors, retry_errors_list| println!("## `connect_to_server()`: successfully connected after retrying {} times (failed attempts: [{loggable_retry_errors}])", retry_errors_list.len()))
             .into()
@@ -322,12 +340,12 @@ impl Socket {
             .into()
     }
 
-    /// Proves the `keen-retry` API is optionable... you may not recruit any of its features
+    /// Proves the `keen-retry` API is optable... you may not recruit any of its features
     /// (in this case, the behavior will be identical to `Result<>`)
-    // pub fn receive(&self) -> Result<&'static str, TransportErrors<&'static str>> {
-    //     self.receive_retry()
-    //        .into()     // actually, this is the only needed part to convert between the `keen-retry` API and `Result<>`
-    // }
+    pub fn receive(&self) -> Result<&'static str, TransportErrors<&'static str>> {
+        self.receive_retry()
+           .into()     // actually, this is the only needed part to convert between the `keen-retry` API and `Result<>` -- but notice there is no `.retry_with()` here
+    }
 
     pub fn is_connected(&self) -> bool {
         self.is_connected.load(Relaxed)
@@ -337,7 +355,7 @@ impl Socket {
     // low level functions //
     /////////////////////////
 
-    async fn connect_to_server_retry(self: &Arc<Self>) -> RetryConsumerResult<(), (), ConnectionErrors> {
+    async fn connect_to_server_retry(&self) -> RetryConsumerResult<(), (), ConnectionErrors> {
         self.connect_to_server_raw().await
             .map_or_else(|error| match error.is_fatal() {
                             true  => RetryConsumerResult::Fatal { input: (), error },
@@ -347,7 +365,7 @@ impl Socket {
     }
 
     /// Simulates a real connection, failing according to the configuration
-    async fn connect_to_server_raw(self: &Arc<Self>) -> Result<(), ConnectionErrors> {
+    async fn connect_to_server_raw(&self) -> Result<(), ConnectionErrors> {
         self.connection_attempts.fetch_add(1, Relaxed);
         if self.connection_success_latch_countdown.fetch_sub(1, Relaxed) <= 1 {
             self.connection_fatal_failure_latch_countdown.fetch_sub(1, Relaxed);
@@ -411,14 +429,8 @@ impl Socket {
 
         self.receive_raw()
             .map_or_else(|error| match error.is_fatal() {
-                             true  => {
-                                 let (_payload, error) = error.split();
-                                 RetryProducerResult::Fatal { input: (), error }
-                             },
-                             false => {
-                                 let (_payload, error) = error.split();
-                                 RetryProducerResult::Retry { input: (), error }
-                             },
+                             true  => RetryProducerResult::Fatal { input: (), error },
+                             false => RetryProducerResult::Retry { input: (), error },
                          },
                          |payload| RetryProducerResult::Ok { reported_input: (), output: payload })
     }
@@ -427,7 +439,7 @@ impl Socket {
     /// Here, we are just interested into exploring the API over a function that produces results, instead of consuming it (like send() does)
     fn receive_raw(&self)
                   -> Result<&'static str, TransportErrors<&'static str>> {
-        if !self.is_connected.load(Relaxed) {
+        if !self.is_connected() {
             Err(TransportErrors::NotConnected { payload: None })
         } else {
             Ok("'Hello, Earthling!'")

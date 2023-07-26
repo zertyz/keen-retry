@@ -57,6 +57,8 @@ RetryResult<ReportedInput,
         self
     }
 
+    /// Spots on the data of an operation that failed fatably on the first shot (in which case, no retrying will be attempted).
+    ///   - `f(&original_input, &error_type)`
     pub fn inspect_fatal<IgnoredReturn,
                          F: FnOnce(&OriginalInput, &ErrorType) -> IgnoredReturn>
                         (self, f: F) -> Self {
@@ -66,6 +68,8 @@ RetryResult<ReportedInput,
         self
     }
 
+    /// Changes the input & output data associated with an operation that was successful at the first shot.
+    ///   - `f(reported_input, output) -> (new_reported_input, new_output)`
     pub fn map_ok<NewReportedInput,
                   NewOutput,
                   F: FnOnce(ReportedInput, Output) -> (NewReportedInput, NewOutput)>
@@ -80,6 +84,12 @@ RetryResult<ReportedInput,
         }
     }
 
+    /// Changes the original input data to be re-fed to an operation that failed and will be retried.
+    ///   - `f(original_input) -> new_original_input`.
+    ///
+    /// A nice usage would be to upgrade the initial payload to a tuple, keeping track of how much time will be spent retrying:
+    /// ```nocompile
+    ///     .map_input(|payload| (payload, SystemTime::now()))
     pub fn map_input<NewOriginalInput,
                      F: FnOnce(OriginalInput) -> NewOriginalInput>
                     (self, f: F) -> RetryResult<ReportedInput, NewOriginalInput, Output, ErrorType> {
@@ -108,7 +118,7 @@ RetryResult<ReportedInput,
         }
     }
 
-    /// Upgrades this [RetryResult] into a [KeenRetryExecutor], which will, on its turn, be upgraded to [ResolvedResult], containing the final results of the retryable operation
+    /// Upgrades this [RetryResult] into a [KeenRetryExecutor], which will, on its turn, be upgraded to [ResolvedResult], containing the final results after executing the retryable operation
     pub fn retry_with<RetryFn: FnMut(OriginalInput) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>
                      (self,
                       retry_operation: RetryFn)
@@ -121,7 +131,7 @@ RetryResult<ReportedInput,
         }
     }
 
-    /// Upgrades this [RetryResult] into a [KeenRetryExecutor], which will, on its turn, be upgraded to [ResolvedResult], containing the final results of the retryable operation
+    /// Upgrades this [RetryResult] into a [KeenRetryAsyncExecutor], which will, on its turn, be upgraded to [ResolvedResult], containing the final results after executing the retryable operation
     pub fn retry_with_async<AsyncRetryFn: FnMut(OriginalInput) -> OutputFuture,
                             OutputFuture: Future<Output=RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>>
                            (self,
@@ -135,4 +145,25 @@ RetryResult<ReportedInput,
         }
     }
 
+}
+
+impl<ReportedInput,
+     OriginalInput,
+     Output,
+     ErrorType: Debug>
+Into<Result<Output, ErrorType>> for
+RetryResult<ReportedInput,
+            OriginalInput,
+            Output,
+            ErrorType> {
+
+    /// Opts out of any retrying attempts and converts the "first shot" of a retryable operation into a `Result<>`.\
+    /// To opt-in the retrying process, see [RetryResult::retry_with()] or [RetryResult::retry_with_async()]
+    fn into(self) -> Result<Output, ErrorType> {
+        match self {
+            RetryResult::Ok { reported_input, output } => Ok(output),
+            RetryResult::Fatal { input: _, error }                => Err(error),
+            RetryResult::Retry { input: _, error }                => Err(error),
+        }
+    }
 }
