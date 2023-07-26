@@ -86,7 +86,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     let case_name = "2) Failed fatably at the first shot";
     println!("\n{}:", case_name);
     let to_send = || MyPayload { message: case_name };
-    let expected = Err(TransportErrors::QuotaExhausted { payload: None, root_cause: format!("any root cause....").into() });
+    let expected = Err(TransportErrors::QuotaExhausted { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
     let mut socket = Socket::new(13, 0, 11, 13, 10, 1);
     socket.connect_to_server().await?;
     let result = socket.send(to_send()).await;
@@ -112,10 +112,11 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
 
     let case_name = "4) Failed due to give up retrying `send()` after exceeding 13 attempts";
     println!("\n{}:", case_name);
-    let expected = Err(TransportErrors::ConnectionDropped { payload: None, root_cause: format!("any root cause....").into() });
+    let to_send = || MyPayload { message: case_name };
+    let expected = Err(TransportErrors::ConnectionDropped { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
     let mut socket = Socket::new(13, 1, 999, 13, 15, 16);
     socket.connect_to_server().await?;
-    let result = socket.send(MyPayload { message: case_name }).await;
+    let result = socket.send(to_send()).await;
     assert_eq!(result, expected, "In '{}'", case_name);
     assert_eq!(socket.is_connected(), false, "In '{}'", case_name);
 
@@ -285,7 +286,7 @@ impl Socket {
 
         let loggable_payload = format!("{:?}", payload);
         self.send_retry(payload)
-            .inspect_fatal(|payload, fatal_err| println!("## `send()`: fatal error (won't retry): {:?}", fatal_err))
+            .inspect_fatal(|payload, fatal_err| println!("## `send({:?})`: fatal error (won't retry): {:?}", payload, fatal_err))
             .map_ok(|_, _| ((loggable_payload, Duration::ZERO), () ) )
             .map_input(|payload| ( /*loggable_payload:*/format!("{:?}", &payload), payload, SystemTime::now() ) )
             .retry_with_async(|(loggable_payload, payload, retry_start)| async move {
@@ -302,23 +303,22 @@ impl Socket {
             })
             .with_delays(RETRY_DELAY_MILLIS.into_iter().map(|millis| Duration::from_millis(millis)))
             .await
-            .inspect_given_up(|(loggable_payload, payload, retry_start), loggable_retry_errors, retry_errors_list| println!("## `send({:?})` FAILED after exhausting all {} retrying attempts in {:?} [{loggable_retry_errors}]",  payload, retry_errors_list.len(), retry_start.elapsed()))
-            .inspect_unrecoverable(|payload_triplet, loggable_retry_errors, retry_errors_list, fatal_error| payload_triplet.as_ref().is_some_and(|(_loggable_payload, payload, retry_start)| {
+            .inspect_given_up(|(loggable_payload, payload, retry_start), loggable_retry_errors, retry_errors_list, fatal_error| println!("## `send({:?})` FAILED after exhausting all {} retrying attempts in {:?} [{loggable_retry_errors}]",  payload, retry_errors_list.len(), retry_start.elapsed()))
+            .inspect_unrecoverable(|(_loggable_payload, payload, retry_start), loggable_retry_errors, retry_errors_list, fatal_error| {
                 println!("## `send({:?})`: fatal error after trying {} time(s) in {:?}: {:?} -- prior to that fatal failure, these retry attempts also failed: [{loggable_retry_errors}]", payload, retry_errors_list.len()+1, retry_start.elapsed().unwrap(), fatal_error);
-                true
-            }))
+            })
             .inspect_recovered(|(loggable_payload, duration), _output, loggable_retry_errors, retry_errors_list| println!("## `send({loggable_payload})`: succeeded after trying {} time(s) in {:?}: [{loggable_retry_errors}]", retry_errors_list.len()+1, duration))
             // remaps the input types back to their originals, simulating we are interested in only part of it (that other part was usefull only for instrumentation)
             .map_unrecoverable_input(|(loggable_payload, payload, retry_start)| payload)
-            .map_reported_input(|loggable_payload_and_duration| loggable_payload_and_duration.map(|v| v.0))
+            .map_reported_input(|(loggable_payload, duration)| loggable_payload)
             // demonstrates how to map the reported input (`loggable_payload` in our case) into the output, so it will be available at final `Ok(loggable_payload)` result
-            .map_reported_input_and_output(|reported_input, output| (output, reported_input.unwrap_or("<<absent loggable_payload>>".to_string())))
+            .map_reported_input_and_output(|reported_input, output| (output, reported_input) )
             // go an extra mile to demonstrate how to place back the payloads of failed requests in `Option<>` field
             .map_errors(|mut fatal_error, payload| {
-                            fatal_error.for_payload(|mut_payload| payload.and_then(|payload| mut_payload.replace(payload)));
-                            fatal_error
+                            fatal_error.for_payload(|mut_payload| mut_payload.replace(payload));
+                            ((), fatal_error)
                         },
-                        |unmapped| unmapped)
+                        |ignored| ignored)
             .into()
     }
 

@@ -79,10 +79,15 @@ KeenRetryExecutor<ReportedInput,
                     input = match new_retry_result {
                         RetryResult::Ok    { reported_input, output } => return ResolvedResult::Recovered { reported_input, output, retry_errors },
                         RetryResult::Retry { input, error }          => { retry_errors.push(error); input },
-                        RetryResult::Fatal { input, error }          => return ResolvedResult::Unrecoverable { input: Some(input), retry_errors, fatal_error: error },
+                        RetryResult::Fatal { input, error }          => return ResolvedResult::Unrecoverable { input, retry_errors, fatal_error: error },
                     }
                 }
-                ResolvedResult::GivenUp { input, retry_errors }
+                // retries exhausted without success: report as `GivenUp` (unless the number of retries was 0)
+                let fatal_error = retry_errors.pop();
+                match fatal_error {
+                    Some(fatal_error) => ResolvedResult::GivenUp       { input, retry_errors, fatal_error },
+                    None                        => panic!("BUG! the `keen-retry` crate has a bug in the way it start retries: a retry can only be created with the first error having been registered"),
+                }
             }
         }
     }
