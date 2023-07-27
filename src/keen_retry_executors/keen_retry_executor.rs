@@ -2,10 +2,14 @@
 // //! Keep this in sync with ../keen_retry_async_executor.rs
 
 
-use std::fmt::Debug;
-use std::time::{Duration, SystemTime};
-use crate::{RetryConsumerResult, RetryResult};
-use crate::resolved_result::ResolvedResult;
+use crate::{
+    resolved_result::ResolvedResult,
+    RetryResult,
+};
+use std::{
+    time::{Duration, SystemTime},
+    fmt::Debug,
+};
 
 /// Executes the retry logic according to the chosen backoff algorithm and limits, keeping track of retry metrics;
 pub enum KeenRetryExecutor<ReportedInput,

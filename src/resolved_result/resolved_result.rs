@@ -1,8 +1,10 @@
 //! Resting place for [ResolvedResult]
 
 
-use std::collections::BTreeMap;
-use std::fmt::Debug;
+use std::{
+    fmt::Debug,
+    collections::BTreeMap,
+};
 
 /// Contains all possibilities for finished retryable operations -- conversible to `Result<>` --
 /// and some nice facilities for instrumentation (like building a succinct report of the retry errors)
@@ -226,11 +228,11 @@ ResolvedResult<ReportedInput,
     /// Lossy operation that will convert this already resolved operation (after some possible retries) into a `Result<>`
     fn into(self) -> Result<Output, ErrorType> {
         match self {
-            ResolvedResult::Ok { reported_input, output }                                     => Ok(output),
-            ResolvedResult::Fatal { input: _, error }                                                    => Err(error),
-            ResolvedResult::Recovered { reported_input: _, output, retry_errors: _ }                       => Ok(output),
-            ResolvedResult::GivenUp { input: _, retry_errors: _, fatal_error }                           => Err(fatal_error),
-            ResolvedResult::Unrecoverable { input, retry_errors, fatal_error } => Err(fatal_error),
+            ResolvedResult::Ok { reported_input: _, output }                            => Ok(output),
+            ResolvedResult::Fatal { input: _, error }                                => Err(error),
+            ResolvedResult::Recovered { reported_input: _, output, retry_errors: _ }    => Ok(output),
+            ResolvedResult::GivenUp { input: _, retry_errors: _, fatal_error }       => Err(fatal_error),
+            ResolvedResult::Unrecoverable { input: _, retry_errors: _, fatal_error } => Err(fatal_error),
         }
     }
 }

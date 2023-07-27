@@ -2,14 +2,14 @@
 //! Keep this in sync with ../keen_retry_executor.rs
 
 
-use std::cell::UnsafeCell;
-use std::fmt::Debug;
-use std::future;
-use std::future::Future;
-use std::sync::Arc;
-use std::time::{Duration, SystemTime};
-use crate::{RetryConsumerResult, RetryResult};
-use crate::resolved_result::ResolvedResult;
+use crate::{resolved_result::ResolvedResult, RetryResult};
+use std::{
+    time::{Duration, SystemTime},
+    sync::Arc,
+    future::{Future, self},
+    fmt::Debug,
+    cell::UnsafeCell,
+};
 
 /// Executes the retry logic according to the chosen backoff algorithm and limits, keeping track of retry metrics;
 pub enum KeenRetryAsyncExecutor<ReportedInput,
@@ -141,7 +141,7 @@ KeenRetryAsyncExecutor<ReportedInput,
                     Ok((input, retry_errors))
                 }
             },
-            |_input, _error, retry_errors_list| future::ready(())
+            |_input, _error, _retry_errors_list| future::ready(())
         ).await
     }
 

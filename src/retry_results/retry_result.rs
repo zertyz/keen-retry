@@ -1,10 +1,14 @@
 //! Resting place for [RetryResult]
 
 
-use std::fmt::Debug;
-use std::future::Future;
-use crate::keen_retry_async_executor::KeenRetryAsyncExecutor;
-use crate::keen_retry_executor::KeenRetryExecutor;
+use crate::{
+    keen_retry_executor::KeenRetryExecutor,
+    keen_retry_async_executor::KeenRetryAsyncExecutor,
+};
+use std::{
+    future::Future,
+    fmt::Debug,
+};
 
 /// Wrapper for the return type of fallible & retryable functions -- an extension for `Result<OkPayload, ErrorType>`,
 /// but also accepting an `input`.\
@@ -161,7 +165,7 @@ RetryResult<ReportedInput,
     /// To opt-in the retrying process, see [RetryResult::retry_with()] or [RetryResult::retry_with_async()]
     fn into(self) -> Result<Output, ErrorType> {
         match self {
-            RetryResult::Ok { reported_input, output } => Ok(output),
+            RetryResult::Ok { reported_input: _, output }            => Ok(output),
             RetryResult::Fatal { input: _, error }                => Err(error),
             RetryResult::Retry { input: _, error }                => Err(error),
         }

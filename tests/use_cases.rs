@@ -15,12 +15,11 @@
 use keen_retry::{RetryConsumerResult, RetryProducerResult};
 use std::{
     fmt::Debug,
-    time::Duration,
+    time::{Duration, SystemTime},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering::Relaxed}},
 };
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32};
-use std::sync::atomic::Ordering::Relaxed;
-use std::time::SystemTime;
 use thiserror::Error;
 
 
@@ -33,35 +32,35 @@ async fn simple_retries() -> Result<(), StdErrorType> {
 
     let case_name = "1) Good at the first shot";
     // println!("\n{}:", case_name);
-    let mut socket = Socket::new(13, 1, 2, 0, 0, 0);
+    let socket = Socket::new(1, 2, 0, 0);
     let result = socket.connect_to_server().await;
     assert_eq!(result, Ok(()), "In '{}'", case_name);
     assert_eq!(socket.is_connected(), true, "In '{}'", case_name);
 
     let case_name = "2) Failed fatably at the first shot";
     // println!("\n{}:", case_name);
-    let mut socket = Socket::new(13, 2, 1, 0, 0, 0);
+    let socket = Socket::new(2, 1, 0, 0);
     let result = socket.connect_to_server().await;
     assert_eq!(result, Err(ConnectionErrors::WrongCredentials), "In '{}'", case_name);
     assert_eq!(socket.is_connected(), false, "In '{}'", case_name);
 
     let case_name = "3) Recovered from failure on the 10th attempt";
     // println!("\n{}:", case_name);
-    let mut socket = Socket::new(13, 10, 11, 0, 0, 0);
+    let socket = Socket::new(10, 11, 0, 0);
     let result = socket.connect_to_server().await;
     assert_eq!(result, Ok(()), "In '{}'", case_name);
     assert_eq!(socket.is_connected(), true, "In '{}'", case_name);
 
     let case_name = "4) Failed due to give up retrying after exceeding 13 attempts";
     // println!("\n{}:", case_name);
-    let mut socket = Socket::new(13, 15, 16, 0, 0, 0);
+    let socket = Socket::new(15, 16, 0, 0);
     let result = socket.connect_to_server().await;
     assert_eq!(result, Err(ConnectionErrors::ServerTooBusy), "In '{}'", case_name);
     assert_eq!(socket.is_connected(), false, "In '{}'", case_name);
 
     let case_name = "5) Failed fatably during the 10th retry attempt";
     // println!("\n{}:", case_name);
-    let mut socket = Socket::new(13, 11, 10, 0, 0, 0);
+    let socket = Socket::new(11, 10, 0, 0);
     let result = socket.connect_to_server().await;
     assert_eq!(result, Err(ConnectionErrors::WrongCredentials), "In '{}'", case_name);
     assert_eq!(socket.is_connected(), false, "In '{}'", case_name);
@@ -77,7 +76,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     let case_name = "1) Good at the first shot";
     println!("\n{}:", case_name);
     let expected = Ok(format!("{:?}", MyPayload { message: case_name }));
-    let mut socket = Socket::new(13, 1, 11, 13, 1, 2);
+    let socket = Socket::new(1, 11, 1, 2);
     socket.connect_to_server().await?;
     let result = socket.send(MyPayload { message: case_name }).await;
     assert_eq!(result, expected, "In '{}'", case_name);
@@ -87,7 +86,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     println!("\n{}:", case_name);
     let to_send = || MyPayload { message: case_name };
     let expected = Err(TransportErrors::QuotaExhausted { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
-    let mut socket = Socket::new(13, 0, 11, 13, 10, 1);
+    let socket = Socket::new(0, 11, 10, 1);
     socket.connect_to_server().await?;
     let result = socket.send(to_send()).await;
     assert_eq!(result, expected, "In '{}'", case_name);
@@ -96,7 +95,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     let case_name = "3.1) Recovered from failure on the 10th attempt (connection was initially OK)";
     println!("\n{}:", case_name);
     let expected = Ok(format!("{:?}", MyPayload { message: case_name }));
-    let mut socket = Socket::new(13, 0, 999, 13, 10, 11);
+    let socket = Socket::new(0, 999, 10, 11);
     socket.connect_to_server().await?;
     let result = socket.send(MyPayload { message: case_name }).await;
     assert_eq!(result, expected, "In '{}'", case_name);
@@ -105,7 +104,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     let case_name = "3.2) Recovered from failure on the 10th attempt (connection was initially NOT OK and will only succeed at the 5th attempt)";
     println!("\n{}:", case_name);
     let expected = Ok(format!("{:?}", MyPayload { message: case_name }));
-    let mut socket = Socket::new(13, 5, 999, 13, 10, 11);
+    let socket = Socket::new(5, 999, 10, 11);
     let result = socket.send(MyPayload { message: case_name }).await;
     assert_eq!(result, expected, "In '{}'", case_name);
     assert_eq!(socket.is_connected(), true, "In '{}'", case_name);
@@ -114,7 +113,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     println!("\n{}:", case_name);
     let to_send = || MyPayload { message: case_name };
     let expected = Err(TransportErrors::ConnectionDropped { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
-    let mut socket = Socket::new(13, 1, 999, 13, 15, 16);
+    let socket = Socket::new(1, 999, 15, 16);
     socket.connect_to_server().await?;
     let result = socket.send(to_send()).await;
     assert_eq!(result, expected, "In '{}'", case_name);
@@ -124,7 +123,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     println!("\n{}:", case_name);
     let to_send = || MyPayload { message: case_name };
     let expected = Err(TransportErrors::QuotaExhausted { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
-    let mut socket = Socket::new(13, 1, 999, 13, 999, 10);
+    let socket = Socket::new(1, 999, 999, 10);
     socket.connect_to_server().await?;
     let result = socket.send(to_send()).await;
     assert_eq!(result, expected, "In '{}'", case_name);
@@ -134,7 +133,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     println!("\n{}:", case_name);
     let to_send = || MyPayload { message: case_name };
     let expected = Err(TransportErrors::CannotReconnect { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
-    let mut socket = Socket::new(13, 999, 999, 13, 15, 16);
+    let socket = Socket::new(999, 999, 15, 16);
     let result = socket.send(to_send()).await;
     assert_eq!(result, expected, "In '{}'", case_name);
     assert_eq!(socket.is_connected(), false, "In '{}'", case_name);
@@ -147,13 +146,13 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
 async fn optable_api() -> Result<(), StdErrorType> {
     let case_name = "1) Ok operation";
     println!("\n{}:", case_name);
-    let mut socket = Socket::new(13, 1, 11, 13, 1, 2);
+    let socket = Socket::new(1, 11, 1, 2);
     socket.connect_to_server().await?;
     assert!(socket.receive().is_ok(), "Operation errored when it shouldn't at {case_name}");
 
     let case_name = "2) Err operation";
     println!("\n{}:", case_name);
-    let mut socket = Socket::new(13, 1, 11, 13, 1, 2);
+    let socket = Socket::new(1, 11, 1, 2);
     assert!(socket.receive().is_err(), "Operation didn't errored as it should at {case_name}");
 
     Ok(())
@@ -165,12 +164,10 @@ async fn optable_api() -> Result<(), StdErrorType> {
 /// either a `success_latch_counter` or `fatal_failure_latch_counter` counts down to zero.
 struct Socket {
     is_connected:                             AtomicBool,
-    connection_max_retries:                   AtomicU32,
     /// number of calls for a successful connection to happen (if no failures as scheduled to happen after that, all further connection attempts will also be successful)
     connection_success_latch_countdown:       AtomicI32,
     connection_fatal_failure_latch_countdown: AtomicI32,
     connection_attempts:                      AtomicU32,
-    sending_max_retries:                      AtomicI32,
     sending_success_latch_countdown:          AtomicI32,
     sending_fatal_failure_latch_countdown:    AtomicI32,
     sending_attempts:                         AtomicU32,
@@ -178,19 +175,15 @@ struct Socket {
 
 impl Socket {
 
-    pub fn new(connection_max_retries:                   u32,
-               connection_success_latch_countdown:       i32,
+    pub fn new(connection_success_latch_countdown:       i32,
                connection_fatal_failure_latch_countdown: i32,
-               sending_max_retries:                      i32,
                sending_success_latch_countdown:          i32,
                sending_fatal_failure_latch_countdown:    i32) -> Arc<Self> {
         Arc::new(Self {
             is_connected:                             AtomicBool::new(false),
-            connection_max_retries:                   AtomicU32::new(connection_max_retries),
             connection_success_latch_countdown:       AtomicI32::new(connection_success_latch_countdown),
             connection_fatal_failure_latch_countdown: AtomicI32::new(connection_fatal_failure_latch_countdown),
             connection_attempts:                      AtomicU32::new(0),
-            sending_max_retries:                      AtomicI32::new(sending_max_retries),
             sending_success_latch_countdown:          AtomicI32::new(sending_success_latch_countdown),
             sending_fatal_failure_latch_countdown:    AtomicI32::new(sending_fatal_failure_latch_countdown),
             sending_attempts:                         AtomicU32::new(0),
@@ -234,14 +227,14 @@ impl Socket {
             })
             .with_delays((1..=13).map(|millis| Duration::from_millis((millis as f64 * 1.289f64.powi(millis)) as u64)))
             .await
-            .inspect_given_up(|(loggable_payload, payload, retry_start), loggable_retry_errors, retry_errors_list, fatal_error| println!("## `send({:?})` FAILED after exhausting all {} retrying attempts in {:?} [{loggable_retry_errors}]",  payload, retry_errors_list.len(), retry_start.elapsed()))
+            .inspect_given_up(|(_loggable_payload, payload, retry_start), loggable_retry_errors, retry_errors_list, _fatal_error| println!("## `send({:?})` FAILED after exhausting all {} retrying attempts in {:?} [{loggable_retry_errors}]",  payload, retry_errors_list.len(), retry_start.elapsed()))
             .inspect_unrecoverable(|(_loggable_payload, payload, retry_start), loggable_retry_errors, retry_errors_list, fatal_error| {
                 println!("## `send({:?})`: fatal error after trying {} time(s) in {:?}: {:?} -- prior to that fatal failure, these retry attempts also failed: [{loggable_retry_errors}]", payload, retry_errors_list.len()+1, retry_start.elapsed().unwrap(), fatal_error);
             })
             .inspect_recovered(|(loggable_payload, duration), _output, loggable_retry_errors, retry_errors_list| println!("## `send({loggable_payload})`: succeeded after trying {} time(s) in {:?}: [{loggable_retry_errors}]", retry_errors_list.len()+1, duration))
             // remaps the input types back to their originals, simulating we are interested in only part of it (that other part was usefull only for instrumentation)
-            .map_unrecoverable_input(|(loggable_payload, payload, retry_start)| payload)
-            .map_reported_input(|(loggable_payload, duration)| loggable_payload)
+            .map_unrecoverable_input(|(_loggable_payload, payload, _retry_start)| payload)
+            .map_reported_input(|(loggable_payload, _duration)| loggable_payload)
             // demonstrates how to map the reported input (`loggable_payload` in our case) into the output, so it will be available at final `Ok(loggable_payload)` result
             .map_reported_input_and_output(|reported_input, output| (output, reported_input) )
             // go an extra mile to demonstrate how to place back the payloads of failed requests in `Option<>` field
