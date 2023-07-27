@@ -160,95 +160,8 @@ async fn optable_api() -> Result<(), StdErrorType> {
 }
 
 
-#[derive(Error, Debug, PartialEq)]
-enum ConnectionErrors {
-    /// A fatal error
-    #[error("Wrong Credentials.")]
-    WrongCredentials,
-    /// A retryable error (becomes fatal if the number of retry attempts gets exhausted)
-    #[error("Server too busy. Try again later.")]
-    ServerTooBusy,
-}
-impl ConnectionErrors {
-    pub fn is_fatal(&self) -> bool {
-        match self {
-            ConnectionErrors::ServerTooBusy    => false,
-            ConnectionErrors::WrongCredentials => true,
-        }
-    }
-}
-
-#[derive(Error, Debug)]
-enum TransportErrors<Payload: Debug + PartialEq> {
-    /// A fatal error (while sending)
-    #[error("The sending quota has exhausted for the day.")]
-    QuotaExhausted { payload: Option<Payload>, root_cause: StdErrorType },
-    /// A retryable error (becomes fatal if the number of retry attempts gets exhausted)
-    #[error("The connection was dropped.")]
-    ConnectionDropped { payload: Option<Payload>, root_cause: StdErrorType },
-    /// A fatal error (while retrying a failed reconnection)
-    #[error("A reconnection attempt failed fatably.")]
-    CannotReconnect { payload: Option<Payload>, root_cause: StdErrorType },
-    /// Another retryable error
-    #[error("Socket is not connected.")]
-    NotConnected { payload: Option<Payload> },
-}
-impl<Payload: Debug + PartialEq> TransportErrors<Payload> {
-    pub fn is_fatal(&self) -> bool {
-        match self {
-            TransportErrors::QuotaExhausted    {..} => true,
-            TransportErrors::ConnectionDropped {..} => false,
-            TransportErrors::CannotReconnect   {..} => true,
-            TransportErrors::NotConnected { .. }    => false,
-        }
-    }
-    /// Extracts the payload from the given error (panics if `self` is not a retryable error),
-    pub fn split(self) -> (Payload, Self) {
-        match self {
-            TransportErrors::QuotaExhausted { payload, root_cause } => {
-                ( payload.expect("SendingErrors: extract_retry_payload(SendingErrors::QuotaExhausted {..}): parameter didn't have a payload"),
-                  Self::QuotaExhausted { payload: None, root_cause } )
-            },
-            TransportErrors::ConnectionDropped { payload, root_cause } => {
-                ( payload.expect("SendingErrors: extract_retry_payload(SendingErrors::ConnectionDropped {..}): parameter didn't have a payload"),
-                  Self::ConnectionDropped { payload: None, root_cause } )
-            },
-            TransportErrors::CannotReconnect { payload, root_cause } => {
-                ( payload.expect("SendingErrors: extract_retry_payload(SendingErrors::CannotReconnect {..}): parameter didn't have a payload"),
-                  Self::CannotReconnect { payload: None, root_cause } )
-            },
-            TransportErrors::NotConnected { payload } => {
-                ( payload.expect("SendingErrors: extract_retry_payload(SendingErrors::NotConnected {..}): parameter didn't have a payload"),
-                  Self::NotConnected { payload: None } )
-            },
-        }
-    }
-    pub fn for_payload<AnyRet>(&mut self, f: impl FnOnce(&mut Option<Payload>) -> AnyRet) -> AnyRet {
-        match self {
-            TransportErrors::QuotaExhausted    { ref mut payload, .. } => f(payload),
-            TransportErrors::ConnectionDropped { ref mut payload, .. } => f(payload),
-            TransportErrors::CannotReconnect   { ref mut payload, .. } => f(payload),
-            TransportErrors::NotConnected      { ref mut payload, .. } => f(payload),
-        }
-    }
-}
-impl<Payload: Debug + PartialEq> PartialEq for TransportErrors<Payload> {
-    fn eq(&self, other: &Self) -> bool {
-        match self {
-            TransportErrors::QuotaExhausted    { payload, .. } => if let TransportErrors::QuotaExhausted    { payload: other_payload, ..} = other { payload == other_payload } else { false },
-            TransportErrors::ConnectionDropped { payload, .. } => if let TransportErrors::ConnectionDropped { payload: other_payload, ..} = other { payload == other_payload } else { false },
-            TransportErrors::CannotReconnect   { payload, .. } => if let TransportErrors::CannotReconnect   { payload: other_payload, ..} = other { payload == other_payload } else { false },
-            TransportErrors::NotConnected      { payload, .. } => if let TransportErrors::NotConnected      { payload: other_payload }    = other { payload == other_payload } else { false },
-        }
-    }
-}
-
-
-
-const RETRY_DELAY_MILLIS: [u64; 13] = [10,30,50,100,1,1,1,1,1,1,1,1,1];
-
 /// Example of how to implement a retry mechanism free of instrumentation:
-/// In this hipothetical scenario, when connecting, many retryable errors happen until
+/// In this hypothetical scenario, when connecting, many retryable errors happen until
 /// either a `success_latch_counter` or `fatal_failure_latch_counter` counts down to zero.
 struct Socket {
     is_connected:                             AtomicBool,
@@ -319,7 +232,7 @@ impl Socket {
                     .map_ok(|_, _| ((loggable_payload.clone(), retry_start.elapsed().unwrap()), () ))
                     .map_input(|payload| (loggable_payload, payload, retry_start) )
             })
-            .with_delays(RETRY_DELAY_MILLIS.into_iter().map(|millis| Duration::from_millis(millis)))
+            .with_delays((1..=13).map(|millis| Duration::from_millis((millis as f64 * 1.289f64.powi(millis)) as u64)))
             .await
             .inspect_given_up(|(loggable_payload, payload, retry_start), loggable_retry_errors, retry_errors_list, fatal_error| println!("## `send({:?})` FAILED after exhausting all {} retrying attempts in {:?} [{loggable_retry_errors}]",  payload, retry_errors_list.len(), retry_start.elapsed()))
             .inspect_unrecoverable(|(_loggable_payload, payload, retry_start), loggable_retry_errors, retry_errors_list, fatal_error| {
@@ -447,7 +360,98 @@ impl Socket {
     }
 }
 
+
+/// Our test payload, used in `send()` operations
 #[derive(Debug, PartialEq)]
 struct MyPayload {
     message: &'static str,
+}
+
+/// Custom error types when connecting.\
+/// Custom error types goes hand-in-hand with the `keen-retry` library (to distinguish among fatal and retryable errors).
+/// Consider using the `thiserror` crate if you prefer to log custom error messages instead of the error name.
+#[derive(Error, Debug, PartialEq)]
+enum ConnectionErrors {
+    /// A fatal error
+    #[error("Wrong Credentials.")]
+    WrongCredentials,
+    /// A retryable error (becomes fatal if the number of retry attempts gets exhausted)
+    #[error("Server too busy. Try again later.")]
+    ServerTooBusy,
+}
+impl ConnectionErrors {
+    pub fn is_fatal(&self) -> bool {
+        match self {
+            ConnectionErrors::WrongCredentials => true,
+            ConnectionErrors::ServerTooBusy    => false,
+        }
+    }
+}
+
+/// Custom error type when sending/receiving.\
+/// Here you'll see how to work with errors that carry the `payload` of failed consumer operations
+/// -- the payload is wrapped in an `Option<>` as it needs to be owned, back and forth, by the `keen-retry` logic.
+#[derive(Error, Debug)]
+enum TransportErrors<Payload: Debug + PartialEq> {
+    /// A fatal error (while sending)
+    #[error("The sending quota has exhausted for the day.")]
+    QuotaExhausted { payload: Option<Payload>, root_cause: StdErrorType },
+    /// A retryable error (becomes fatal if the number of retry attempts gets exhausted)
+    #[error("The connection was dropped.")]
+    ConnectionDropped { payload: Option<Payload>, root_cause: StdErrorType },
+    /// A fatal error (while retrying a failed reconnection)
+    #[error("A reconnection attempt failed fatably.")]
+    CannotReconnect { payload: Option<Payload>, root_cause: StdErrorType },
+    /// Another retryable error
+    #[error("Socket is not connected.")]
+    NotConnected { payload: Option<Payload> },
+}
+impl<Payload: Debug + PartialEq> TransportErrors<Payload> {
+    pub fn is_fatal(&self) -> bool {
+        match self {
+            TransportErrors::QuotaExhausted    {..} => true,
+            TransportErrors::CannotReconnect   {..} => true,
+            TransportErrors::ConnectionDropped {..} => false,
+            TransportErrors::NotConnected { .. }    => false,
+        }
+    }
+    /// Extracts the payload from the given error (panics if `self` is not a retryable error),
+    pub fn split(self) -> (Payload, Self) {
+        match self {
+            TransportErrors::QuotaExhausted { payload, root_cause } => {
+                ( payload.expect("SendingErrors: extract_retry_payload(SendingErrors::QuotaExhausted {..}): parameter didn't have a payload"),
+                  Self::QuotaExhausted { payload: None, root_cause } )
+            },
+            TransportErrors::ConnectionDropped { payload, root_cause } => {
+                ( payload.expect("SendingErrors: extract_retry_payload(SendingErrors::ConnectionDropped {..}): parameter didn't have a payload"),
+                  Self::ConnectionDropped { payload: None, root_cause } )
+            },
+            TransportErrors::CannotReconnect { payload, root_cause } => {
+                ( payload.expect("SendingErrors: extract_retry_payload(SendingErrors::CannotReconnect {..}): parameter didn't have a payload"),
+                  Self::CannotReconnect { payload: None, root_cause } )
+            },
+            TransportErrors::NotConnected { payload } => {
+                ( payload.expect("SendingErrors: extract_retry_payload(SendingErrors::NotConnected {..}): parameter didn't have a payload"),
+                  Self::NotConnected { payload: None } )
+            },
+        }
+    }
+    pub fn for_payload<AnyRet>(&mut self, f: impl FnOnce(&mut Option<Payload>) -> AnyRet) -> AnyRet {
+        match self {
+            TransportErrors::QuotaExhausted    { ref mut payload, .. } => f(payload),
+            TransportErrors::ConnectionDropped { ref mut payload, .. } => f(payload),
+            TransportErrors::CannotReconnect   { ref mut payload, .. } => f(payload),
+            TransportErrors::NotConnected      { ref mut payload, .. } => f(payload),
+        }
+    }
+}
+impl<Payload: Debug + PartialEq> PartialEq for TransportErrors<Payload> {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            TransportErrors::QuotaExhausted    { payload, .. } => if let TransportErrors::QuotaExhausted    { payload: other_payload, ..} = other { payload == other_payload } else { false },
+            TransportErrors::ConnectionDropped { payload, .. } => if let TransportErrors::ConnectionDropped { payload: other_payload, ..} = other { payload == other_payload } else { false },
+            TransportErrors::CannotReconnect   { payload, .. } => if let TransportErrors::CannotReconnect   { payload: other_payload, ..} = other { payload == other_payload } else { false },
+            TransportErrors::NotConnected      { payload, .. } => if let TransportErrors::NotConnected      { payload: other_payload }    = other { payload == other_payload } else { false },
+        }
+    }
 }
