@@ -5,10 +5,7 @@ use crate::{
     keen_retry_executor::KeenRetryExecutor,
     keen_retry_async_executor::KeenRetryAsyncExecutor,
 };
-use std::{
-    future::Future,
-    fmt::Debug,
-};
+use std::future::Future;
 
 /// Wrapper for the return type of fallible & retryable functions -- an extension for `Result<OkPayload, ErrorType>`,
 /// but also accepting an `input`.\
@@ -17,7 +14,7 @@ use std::{
 pub enum RetryResult<ReportedInput,
                      OriginalInput,
                      Output,
-                     ErrorType: Debug> {
+                     ErrorType> {
     Ok {
         reported_input: ReportedInput,
         output:         Output,
@@ -37,7 +34,7 @@ pub enum RetryResult<ReportedInput,
 impl<ReportedInput,
      OriginalInput,
      Output,
-     ErrorType: Debug>
+     ErrorType>
 RetryResult<ReportedInput,
             OriginalInput,
             Output,
@@ -154,17 +151,17 @@ RetryResult<ReportedInput,
 impl<ReportedInput,
      OriginalInput,
      Output,
-     ErrorType: Debug>
-Into<Result<Output, ErrorType>> for
-RetryResult<ReportedInput,
-            OriginalInput,
-            Output,
-            ErrorType> {
+     ErrorType>
+From<RetryResult<ReportedInput,
+     OriginalInput,
+     Output,
+     ErrorType>> for
+Result<Output, ErrorType> {
 
     /// Opts out of any retrying attempts and converts the "first shot" of a retryable operation into a `Result<>`.\
     /// To opt-in the retrying process, see [RetryResult::retry_with()] or [RetryResult::retry_with_async()]
-    fn into(self) -> Result<Output, ErrorType> {
-        match self {
+    fn from(retry_result: RetryResult<ReportedInput, OriginalInput, Output, ErrorType>) -> Self {
+        match retry_result {
             RetryResult::Ok { reported_input: _, output }            => Ok(output),
             RetryResult::Fatal { input: _, error }                => Err(error),
             RetryResult::Retry { input: _, error }                => Err(error),

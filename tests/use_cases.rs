@@ -35,35 +35,35 @@ async fn simple_retries() -> Result<(), StdErrorType> {
     let socket = Socket::new(1, 2, 0, 0);
     let result = socket.connect_to_server().await;
     assert_eq!(result, Ok(()), "In '{}'", case_name);
-    assert_eq!(socket.is_connected(), true, "In '{}'", case_name);
+    assert!(socket.is_connected(), "In '{}'", case_name);
 
     let case_name = "2) Failed fatably at the first shot";
     // println!("\n{}:", case_name);
     let socket = Socket::new(2, 1, 0, 0);
     let result = socket.connect_to_server().await;
     assert_eq!(result, Err(ConnectionErrors::WrongCredentials), "In '{}'", case_name);
-    assert_eq!(socket.is_connected(), false, "In '{}'", case_name);
+    assert!(!socket.is_connected(), "In '{}'", case_name);
 
     let case_name = "3) Recovered from failure on the 10th attempt";
     // println!("\n{}:", case_name);
     let socket = Socket::new(10, 11, 0, 0);
     let result = socket.connect_to_server().await;
     assert_eq!(result, Ok(()), "In '{}'", case_name);
-    assert_eq!(socket.is_connected(), true, "In '{}'", case_name);
+    assert!(socket.is_connected(), "In '{}'", case_name);
 
     let case_name = "4) Failed due to give up retrying after exceeding 13 attempts";
     // println!("\n{}:", case_name);
     let socket = Socket::new(15, 16, 0, 0);
     let result = socket.connect_to_server().await;
     assert_eq!(result, Err(ConnectionErrors::ServerTooBusy), "In '{}'", case_name);
-    assert_eq!(socket.is_connected(), false, "In '{}'", case_name);
+    assert!(!socket.is_connected(), "In '{}'", case_name);
 
     let case_name = "5) Failed fatably during the 10th retry attempt";
     // println!("\n{}:", case_name);
     let socket = Socket::new(11, 10, 0, 0);
     let result = socket.connect_to_server().await;
     assert_eq!(result, Err(ConnectionErrors::WrongCredentials), "In '{}'", case_name);
-    assert_eq!(socket.is_connected(), false, "In '{}'", case_name);
+    assert!(!socket.is_connected(), "In '{}'", case_name);
 
     Ok(())
 }
@@ -80,17 +80,17 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     socket.connect_to_server().await?;
     let result = socket.send(MyPayload { message: case_name }).await;
     assert_eq!(result, expected, "In '{}'", case_name);
-    assert_eq!(socket.is_connected(), true, "In '{}'", case_name);
+    assert!(socket.is_connected(), "In '{}'", case_name);
 
     let case_name = "2) Failed fatably at the first shot";
     println!("\n{}:", case_name);
     let to_send = || MyPayload { message: case_name };
-    let expected = Err(TransportErrors::QuotaExhausted { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
+    let expected = Err(TransportErrors::QuotaExhausted { payload: Some(to_send()), root_cause: String::from("any root cause....").into() });
     let socket = Socket::new(0, 11, 10, 1);
     socket.connect_to_server().await?;
     let result = socket.send(to_send()).await;
     assert_eq!(result, expected, "In '{}'", case_name);
-    assert_eq!(socket.is_connected(), false, "In '{}'", case_name);
+    assert!(!socket.is_connected(), "In '{}'", case_name);
 
     let case_name = "3.1) Recovered from failure on the 10th attempt (connection was initially OK)";
     println!("\n{}:", case_name);
@@ -99,7 +99,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     socket.connect_to_server().await?;
     let result = socket.send(MyPayload { message: case_name }).await;
     assert_eq!(result, expected, "In '{}'", case_name);
-    assert_eq!(socket.is_connected(), true, "In '{}'", case_name);
+    assert!(socket.is_connected(), "In '{}'", case_name);
 
     let case_name = "3.2) Recovered from failure on the 10th attempt (connection was initially NOT OK and will only succeed at the 5th attempt)";
     println!("\n{}:", case_name);
@@ -107,36 +107,36 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     let socket = Socket::new(5, 999, 10, 11);
     let result = socket.send(MyPayload { message: case_name }).await;
     assert_eq!(result, expected, "In '{}'", case_name);
-    assert_eq!(socket.is_connected(), true, "In '{}'", case_name);
+    assert!(socket.is_connected(), "In '{}'", case_name);
 
     let case_name = "4) Failed due to give up retrying `send()` after exceeding 13 attempts";
     println!("\n{}:", case_name);
     let to_send = || MyPayload { message: case_name };
-    let expected = Err(TransportErrors::ConnectionDropped { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
+    let expected = Err(TransportErrors::ConnectionDropped { payload: Some(to_send()), root_cause: String::from("any root cause....").into() });
     let socket = Socket::new(1, 999, 15, 16);
     socket.connect_to_server().await?;
     let result = socket.send(to_send()).await;
     assert_eq!(result, expected, "In '{}'", case_name);
-    assert_eq!(socket.is_connected(), false, "In '{}'", case_name);
+    assert!(!socket.is_connected(), "In '{}'", case_name);
 
     let case_name = "5.1) Failed fatably during the 10th retry attempt (in `send()`)";
     println!("\n{}:", case_name);
     let to_send = || MyPayload { message: case_name };
-    let expected = Err(TransportErrors::QuotaExhausted { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
+    let expected = Err(TransportErrors::QuotaExhausted { payload: Some(to_send()), root_cause: String::from("any root cause....").into() });
     let socket = Socket::new(1, 999, 999, 10);
     socket.connect_to_server().await?;
     let result = socket.send(to_send()).await;
     assert_eq!(result, expected, "In '{}'", case_name);
-    assert_eq!(socket.is_connected(), false, "In '{}'", case_name);
+    assert!(!socket.is_connected(), "In '{}'", case_name);
 
     let case_name = "5.2) Failed fatably during a retry attempt (on reconnection)";
     println!("\n{}:", case_name);
     let to_send = || MyPayload { message: case_name };
-    let expected = Err(TransportErrors::CannotReconnect { payload: Some(to_send()), root_cause: format!("any root cause....").into() });
+    let expected = Err(TransportErrors::CannotReconnect { payload: Some(to_send()), root_cause: String::from("any root cause....").into() });
     let socket = Socket::new(999, 999, 15, 16);
     let result = socket.send(to_send()).await;
     assert_eq!(result, expected, "In '{}'", case_name);
-    assert_eq!(socket.is_connected(), false, "In '{}'", case_name);
+    assert!(!socket.is_connected(), "In '{}'", case_name);
 
     Ok(())
 }
@@ -191,12 +191,12 @@ impl Socket {
     }
 
     pub async fn connect_to_server(self: &Arc<Self>) -> Result<(), ConnectionErrors> {
-        let cloned_self = Arc::clone(&self);
+        let cloned_self = Arc::clone(self);
         self.connect_to_server_retry().await
             .retry_with_async(|_| cloned_self.connect_to_server_retry())
-            .with_delays((10..=130).step_by(10).map(|millis| Duration::from_millis(millis)))
+            .with_delays((10..=130).step_by(10).map(Duration::from_millis))
             .await
-            .inspect_recovered(|_, _, loggable_retry_errors, retry_errors_list| println!("## `connect_to_server()`: successfully connected after retrying {} times (failed attempts: [{loggable_retry_errors}])", retry_errors_list.len()))
+            .inspect_recovered(|_, _, retry_errors_list| println!("## `connect_to_server()`: successfully connected after retrying {} times (failed attempts: [{}])", retry_errors_list.len(), keen_retry::loggable_retry_errors(retry_errors_list)))
             .into()
     }
 
@@ -227,11 +227,11 @@ impl Socket {
             })
             .with_delays((1..=13).map(|millis| Duration::from_millis((millis as f64 * 1.289f64.powi(millis)) as u64)))
             .await
-            .inspect_given_up(|(_loggable_payload, payload, retry_start), loggable_retry_errors, retry_errors_list, _fatal_error| println!("## `send({:?})` FAILED after exhausting all {} retrying attempts in {:?} [{loggable_retry_errors}]",  payload, retry_errors_list.len(), retry_start.elapsed()))
-            .inspect_unrecoverable(|(_loggable_payload, payload, retry_start), loggable_retry_errors, retry_errors_list, fatal_error| {
-                println!("## `send({:?})`: fatal error after trying {} time(s) in {:?}: {:?} -- prior to that fatal failure, these retry attempts also failed: [{loggable_retry_errors}]", payload, retry_errors_list.len()+1, retry_start.elapsed().unwrap(), fatal_error);
+            .inspect_given_up(|(_loggable_payload, payload, retry_start), retry_errors_list, _fatal_error| println!("## `send({:?})` FAILED after exhausting all {} retrying attempts in {:?} [{}]",  payload, retry_errors_list.len(), retry_start.elapsed(), keen_retry::loggable_retry_errors(retry_errors_list)))
+            .inspect_unrecoverable(|(_loggable_payload, payload, retry_start), retry_errors_list, fatal_error| {
+                println!("## `send({:?})`: fatal error after trying {} time(s) in {:?}: {:?} -- prior to that fatal failure, these retry attempts also failed: [{}]", payload, retry_errors_list.len()+1, retry_start.elapsed().unwrap(), fatal_error, keen_retry::loggable_retry_errors(retry_errors_list));
             })
-            .inspect_recovered(|(loggable_payload, duration), _output, loggable_retry_errors, retry_errors_list| println!("## `send({loggable_payload})`: succeeded after trying {} time(s) in {:?}: [{loggable_retry_errors}]", retry_errors_list.len()+1, duration))
+            .inspect_recovered(|(loggable_payload, duration), _output, retry_errors_list| println!("## `send({loggable_payload})`: succeeded after trying {} time(s) in {:?}: [{}]", retry_errors_list.len()+1, duration, keen_retry::loggable_retry_errors(retry_errors_list)))
             // remaps the input types back to their originals, simulating we are interested in only part of it (that other part was usefull only for instrumentation)
             .map_unrecoverable_input(|(_loggable_payload, payload, _retry_start)| payload)
             .map_reported_input(|(loggable_payload, _duration)| loggable_payload)
@@ -322,10 +322,10 @@ impl Socket {
                 Ok(())
             } else if self.sending_fatal_failure_latch_countdown.fetch_sub(1, Relaxed) <= 1 {
                 self.is_connected.store(false, Relaxed);
-                Err(TransportErrors::QuotaExhausted { payload: Some(payload), root_cause: format!("You abused sending. Please don't try to send anything else today or you will be banned!").into() })
+                Err(TransportErrors::QuotaExhausted { payload: Some(payload), root_cause: String::from("You abused sending. Please don't try to send anything else today or you will be banned!").into() })
             } else {
                 self.is_connected.store(false, Relaxed);
-                Err(TransportErrors::ConnectionDropped { payload: Some(payload), root_cause: format!("Socket read error (-1)").into() })
+                Err(TransportErrors::ConnectionDropped { payload: Some(payload), root_cause: String::from("Socket read error (-1)").into() })
             }
         }
     }

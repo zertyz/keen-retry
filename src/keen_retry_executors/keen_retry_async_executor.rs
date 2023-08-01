@@ -7,7 +7,6 @@ use std::{
     time::{Duration, SystemTime},
     sync::Arc,
     future::{Future, self},
-    fmt::Debug,
     cell::UnsafeCell,
 };
 
@@ -15,7 +14,7 @@ use std::{
 pub enum KeenRetryAsyncExecutor<ReportedInput,
                                 OriginalInput,
                                 Output,
-                                ErrorType:    Debug,
+                                ErrorType,
                                 AsyncRetryFn: FnMut(OriginalInput) -> OutputFuture,
                                 OutputFuture: Future<Output=RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>> {
 
@@ -43,7 +42,7 @@ pub enum KeenRetryAsyncExecutor<ReportedInput,
 impl<ReportedInput,
      OriginalInput,
      Output,
-     ErrorType:    Debug,
+     ErrorType,
      AsyncRetryFn: FnMut(OriginalInput) -> OutputFuture,
      OutputFuture: Future<Output=RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>>
 

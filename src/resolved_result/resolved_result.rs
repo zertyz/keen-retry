@@ -1,17 +1,12 @@
 //! Resting place for [ResolvedResult]
 
 
-use std::{
-    fmt::Debug,
-    collections::BTreeMap,
-};
-
 /// Contains all possibilities for finished retryable operations -- conversible to `Result<>` --
 /// and some nice facilities for instrumentation (like building a succinct report of the retry errors)
 pub enum ResolvedResult<ReportedInput,
                         OriginalInput,
                         Output,
-                        ErrorType: Debug> {
+                        ErrorType> {
     Ok {
         reported_input: ReportedInput,
         output:         Output,
@@ -45,7 +40,7 @@ pub enum ResolvedResult<ReportedInput,
 impl<ReportedInput,
      OriginalInput,
      Output,
-     ErrorType: Debug>
+     ErrorType>
 
 ResolvedResult<ReportedInput,
                OriginalInput,
@@ -79,34 +74,37 @@ ResolvedResult<ReportedInput,
     }
 
     /// Spots on the data of an already resolved (and unsuccessful) operation that required some retry attempts to succeed.
-    ///   - `f(&reported_input, &output, loggable_retry_errors, &retry_errors_list)`
+    ///   - `f(&reported_input, &output, &retry_errors_list)`
+    ///   - if the error type implements `Debug`, you can do `let loggable_retry_errors = keen_retry::loggable_retry_errors(&retry_errors_list)`
     pub fn inspect_recovered<IgnoredReturn,
-                             F: FnOnce(&ReportedInput, &Output, /*loggable_retry_errors: */String, &Vec<ErrorType>) -> IgnoredReturn>
+                             F: FnOnce(&ReportedInput, &Output, &Vec<ErrorType>) -> IgnoredReturn>
                             (self, f: F) -> Self {
         if let Self::Recovered { ref reported_input, ref output, ref retry_errors } = self {
-            f(reported_input, output, loggable_retry_errors(&retry_errors), retry_errors);
+            f(reported_input, output, retry_errors);
         }
         self
     }
 
     /// Spots on the data of an already resolved (but unsuccessful) operation that got retried as much as it could.
-    ///   - `f(&original_input, loggable_retry_errors, &retry_errors_list, &fatal_error)`
+    ///   - `f(&original_input, &retry_errors_list, &fatal_error)`
+    ///   - if the error type implements `Debug`, you can do `let loggable_retry_errors = keen_retry::loggable_retry_errors(&retry_errors_list)`
     pub fn inspect_given_up<IgnoredReturn,
-                            F: FnOnce(&OriginalInput, /*loggable_retry_errors: */String, &Vec<ErrorType>, /*fatal_error: */&ErrorType) -> IgnoredReturn>
+                            F: FnOnce(&OriginalInput, &Vec<ErrorType>, /*fatal_error: */&ErrorType) -> IgnoredReturn>
                            (self, f: F) -> Self {
         if let Self::GivenUp { ref input, ref retry_errors, ref fatal_error } = self {
-            f(input, loggable_retry_errors(&retry_errors), retry_errors, fatal_error);
+            f(input, retry_errors, fatal_error);
         }
         self
     }
 
     /// Spots on the data of an already resolved (but unsuccessful) operation that failed fatably in one of its retry attempts.
-    ///   - `f(&original_input, loggable_retry_errors, &retry_errors_list, &fatal_error)`
+    ///   - `f(&original_input, &retry_errors_list, &fatal_error)`
+    ///   - if the error type implements `Debug`, you can do `let loggable_retry_errors = keen_retry::loggable_retry_errors(&retry_errors_list)`
     pub fn inspect_unrecoverable<IgnoredReturn,
-                                 F: FnOnce(&OriginalInput, /*loggable_retry_errors: */String, &Vec<ErrorType>, /*fatal_error: */&ErrorType) -> IgnoredReturn>
+                                 F: FnOnce(&OriginalInput, &Vec<ErrorType>, /*fatal_error: */&ErrorType) -> IgnoredReturn>
                                 (self, f: F) -> Self {
         if let Self::Unrecoverable { ref input, ref retry_errors, ref fatal_error } = self {
-            f(input, loggable_retry_errors(&retry_errors), retry_errors, fatal_error);
+            f(input, retry_errors, fatal_error);
         }
         self
     }
@@ -122,11 +120,11 @@ ResolvedResult<ReportedInput,
                                    F: FnOnce(OriginalInput) -> NewOriginalInput>
                                   (self, f: F) -> ResolvedResult<ReportedInput, NewOriginalInput, Output, ErrorType> {
         match self {
-            ResolvedResult::Ok            { reported_input, output }                             => ResolvedResult::Ok            { reported_input, output },
+            ResolvedResult::Ok            { reported_input, output }                               => ResolvedResult::Ok            { reported_input, output },
             ResolvedResult::Fatal         { input, error }                                      => ResolvedResult::Fatal         { input: f(input), error },
             ResolvedResult::Recovered     { reported_input, output, retry_errors } => ResolvedResult::Recovered     { reported_input, output, retry_errors },
-            ResolvedResult::GivenUp       { input, retry_errors, fatal_error }    => ResolvedResult::GivenUp       { input: f(input), retry_errors, fatal_error },
-            ResolvedResult::Unrecoverable { input, retry_errors, fatal_error }    => ResolvedResult::Unrecoverable { input: f(input), retry_errors, fatal_error },
+            ResolvedResult::GivenUp       { input, retry_errors, fatal_error }  => ResolvedResult::GivenUp       { input: f(input), retry_errors, fatal_error },
+            ResolvedResult::Unrecoverable { input, retry_errors, fatal_error }  => ResolvedResult::Unrecoverable { input: f(input), retry_errors, fatal_error },
         }
     }
 
@@ -190,21 +188,21 @@ ResolvedResult<ReportedInput,
                       RetryErrorsMapFn: FnMut(ErrorType)                 -> NewErrorType>
 
                      (self,
-                      fatal_error_map:      FatalErrorMapFn,
-                      mut retry_errors_map: RetryErrorsMapFn)
+                      fatal_error_map:  FatalErrorMapFn,
+                      retry_errors_map: RetryErrorsMapFn)
 
                       -> ResolvedResult<ReportedInput, NewOriginalInput, Output, NewErrorType> {
 
         match self {
-            ResolvedResult::Ok            { reported_input, output }                             => ResolvedResult::Ok            { reported_input, output },
-            ResolvedResult::Recovered     { reported_input, output, retry_errors } => ResolvedResult::Recovered     { reported_input, output, retry_errors: retry_errors.into_iter().map(|e| retry_errors_map(e)).collect() },
-            ResolvedResult::Unrecoverable { input, retry_errors, fatal_error }    => {
+            ResolvedResult::Ok            { reported_input, output }                               => ResolvedResult::Ok            { reported_input, output },
+            ResolvedResult::Recovered     { reported_input, output, retry_errors } => ResolvedResult::Recovered     { reported_input, output, retry_errors: retry_errors.into_iter().map(retry_errors_map).collect() },
+            ResolvedResult::Unrecoverable { input, retry_errors, fatal_error }  => {
                 let (new_input, new_fatal_error) = fatal_error_map(fatal_error, input);
-                ResolvedResult::Unrecoverable { input: new_input, retry_errors: retry_errors.into_iter().map(|e| retry_errors_map(e)).collect(), fatal_error: new_fatal_error }
+                ResolvedResult::Unrecoverable { input: new_input, retry_errors: retry_errors.into_iter().map(retry_errors_map).collect(), fatal_error: new_fatal_error }
             },
             ResolvedResult::GivenUp { input, retry_errors, fatal_error } => {
                 let (new_input, new_fatal_error) = fatal_error_map(fatal_error, input);
-                ResolvedResult::GivenUp { input: new_input, retry_errors: retry_errors.into_iter().map(|e| retry_errors_map(e)).collect(), fatal_error: new_fatal_error }
+                ResolvedResult::GivenUp { input: new_input, retry_errors: retry_errors.into_iter().map(retry_errors_map).collect(), fatal_error: new_fatal_error }
             },
             ResolvedResult::Fatal { input, error } => {
                 let (new_input, new_error) = fatal_error_map(error, input);
@@ -218,16 +216,16 @@ ResolvedResult<ReportedInput,
 impl<ReportedInput,
      OriginalInput,
      Output,
-     ErrorType: Debug>
-Into<Result<Output, ErrorType>> for
-ResolvedResult<ReportedInput,
-               OriginalInput,
-               Output,
-               ErrorType> {
+     ErrorType>
+From<ResolvedResult<ReportedInput,
+                    OriginalInput,
+                    Output,
+                    ErrorType>> for
+Result<Output, ErrorType> {
 
     /// Lossy operation that will convert this already resolved operation (after some possible retries) into a `Result<>`
-    fn into(self) -> Result<Output, ErrorType> {
-        match self {
+    fn from(resolved_result: ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType>) -> Result<Output, ErrorType> {
+        match resolved_result {
             ResolvedResult::Ok { reported_input: _, output }                            => Ok(output),
             ResolvedResult::Fatal { input: _, error }                                => Err(error),
             ResolvedResult::Recovered { reported_input: _, output, retry_errors: _ }    => Ok(output),
@@ -237,8 +235,13 @@ ResolvedResult<ReportedInput,
     }
 }
 
-/// builds an as-short-as-possible list of `retry_errors` occurrences (out of order)
-fn loggable_retry_errors<ErrorType: Debug>(retry_errors: &Vec<ErrorType>) -> String {
+use std::{
+    fmt::Debug,
+    collections::BTreeMap,
+};
+/// builds an as-short-as-possible list of `retry_errors` occurrences (out of order),
+/// provided `ErrorType` implements the `Debug` trait.
+pub fn loggable_retry_errors<ErrorType: Debug>(retry_errors: &Vec<ErrorType>) -> String {
     let mut counts = BTreeMap::<String, u32>::new();
     for error in retry_errors {
         let error_string = format!("{:?}", error);
@@ -249,4 +252,3 @@ fn loggable_retry_errors<ErrorType: Debug>(retry_errors: &Vec<ErrorType>) -> Str
         .collect::<Vec<_>>()
         .join(", ")
 }
-

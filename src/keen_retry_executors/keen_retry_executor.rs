@@ -6,17 +6,14 @@ use crate::{
     resolved_result::ResolvedResult,
     RetryResult,
 };
-use std::{
-    time::{Duration, SystemTime},
-    fmt::Debug,
-};
+use std::time::{Duration, SystemTime};
 
 /// Executes the retry logic according to the chosen backoff algorithm and limits, keeping track of retry metrics;
 pub enum KeenRetryExecutor<ReportedInput,
                            OriginalInput,
                            Output,
-                           ErrorType: Debug,
-                           RetryFn:   FnMut(OriginalInput) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType>> {
+                           ErrorType,
+                           RetryFn: FnMut(OriginalInput) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType>> {
 
 
     /// Indicates no retrying is needed as the operation completed successfully on the initial attempt
@@ -43,8 +40,8 @@ pub enum KeenRetryExecutor<ReportedInput,
 impl<ReportedInput,
      OriginalInput,
      Output,
-     ErrorType: Debug,
-     RetryFn:   FnMut(OriginalInput) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>
+     ErrorType,
+     RetryFn: FnMut(OriginalInput) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>
 
 
 KeenRetryExecutor<ReportedInput,
