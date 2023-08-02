@@ -146,6 +146,18 @@ RetryResult<ReportedInput,
         }
     }
 
+    pub fn is_ok(&self) -> bool {
+        matches!(self, RetryResult::Ok {..})
+    }
+
+    pub fn is_fatal(&self) -> bool {
+        matches!(self, RetryResult::Fatal {..})
+    }
+
+    pub fn is_retry(&self) -> bool {
+        matches!(self, RetryResult::Retry {..})
+    }
+
 }
 
 impl<ReportedInput,
