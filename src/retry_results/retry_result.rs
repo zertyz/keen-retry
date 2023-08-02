@@ -158,6 +158,24 @@ RetryResult<ReportedInput,
         matches!(self, RetryResult::Retry {..})
     }
 
+    pub fn expect_ok(&self, panic_msg: &str) {
+        if !self.is_ok() {
+            panic!("{panic_msg}")
+        }
+    }
+
+    pub fn expect_fatal(&self, panic_msg: &str) {
+        if !self.is_fatal() {
+            panic!("{panic_msg}")
+        }
+    }
+
+    pub fn expect_retry(&self, panic_msg: &str) {
+        if !self.is_retry() {
+            panic!("{panic_msg}")
+        }
+    }
+
 }
 
 impl<ReportedInput,
