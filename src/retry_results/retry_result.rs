@@ -101,6 +101,8 @@ RetryResult<ReportedInput,
         }
     }
 
+    /// Changes the (value of the) error that indicates this operation may be retried.\
+    /// See [Self::map_errors()] if you'd also like to change the type.
     pub fn map_retry_error<F: FnOnce(ErrorType) -> ErrorType>
                           (self, f: F) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType> {
         match self {
@@ -110,12 +112,30 @@ RetryResult<ReportedInput,
         }
     }
 
+    /// Changes the (value of the) error that indicates this operation may not be retried.\
+    /// See [Self::map_errors()] if you'd also like to change the type.
     pub fn map_fatal_error<F: FnOnce(ErrorType) -> ErrorType>
                           (self, f: F) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType> {
         match self {
             RetryResult::Ok    { reported_input, output } => RetryResult::Ok    { reported_input, output },
             RetryResult::Retry { input, error }          => RetryResult::Retry { input, error },
             RetryResult::Fatal { input, error }          => RetryResult::Fatal { input, error: f(error) },
+        }
+    }
+
+    /// Allows changing both the error values & types for an operation that wasn't correctly executed (yet).\
+    /// Other methods are better suited if you want to change just one of the errors -- see [Self::map_retry_error()] & [Self::map_fatal_error()].
+    pub fn map_errors<NewErrorType,
+                      RetryErrorMapFn: FnOnce(ErrorType) -> NewErrorType,
+                      FatalErrorMapFn: FnOnce(ErrorType) -> NewErrorType>
+                     (self,
+                      retry_error_map_fn: RetryErrorMapFn,
+                      fatal_error_map_fn: FatalErrorMapFn)
+                     -> RetryResult<ReportedInput, OriginalInput, Output, NewErrorType> {
+        match self {
+            RetryResult::Ok    { reported_input, output } => RetryResult::Ok    { reported_input, output },
+            RetryResult::Retry { input, error }          => RetryResult::Retry { input, error: retry_error_map_fn(error) },
+            RetryResult::Fatal { input, error }          => RetryResult::Fatal { input, error: fatal_error_map_fn(error) },
         }
     }
 
@@ -174,6 +194,12 @@ RetryResult<ReportedInput,
         if !self.is_retry() {
             panic!("{panic_msg}")
         }
+    }
+
+    /// Syntatic sugar for [Result<Output, ErrorType>::from()].\
+    /// See also [Self::into()]
+    pub fn into_result(self) -> Result::<Output, ErrorType> {
+        Result::<Output, ErrorType>::from(self)
     }
 
 }
