@@ -127,19 +127,21 @@ RetryResult<ReportedInput,
     }
 
     /// Allows changing the (input,error) pairs for both error possibilities:
-    ///   - retry_map_fn(input, retry_error)       -> (new_input, new_retry_error)
-    ///   - fatal_error_map_fn(input, fatal_error) -> (new_input, new_fatal_error)
+    ///   - fatal_map_fn(input, fatal_error) -> (new_input, new_fatal_error)
+    ///   - retry_map_fn(input, retry_error) -> (new_input, new_retry_error)
     /// 
     /// Covers the case where it is desireable to bail out the retrying process of a consumer operation,
     /// moving the consumed input back to the error, so the caller may not lose the payload.
+    /// 
+    /// See also [ResolvedResult::map_inputs_and_errors()] for similar semantics after exhausting retries.
     pub fn map_inputs_and_errors<NewOriginalInput,
                                  NewErrorType,
-                                 RetryMapFn: FnOnce(OriginalInput, ErrorType) -> (NewOriginalInput, NewErrorType),
-                                 FatalMapFn: FnOnce(OriginalInput, ErrorType) -> (NewOriginalInput, NewErrorType)>
+                                 FatalMapFn: FnOnce(OriginalInput, ErrorType) -> (NewOriginalInput, NewErrorType),
+                                 RetryMapFn: FnOnce(OriginalInput, ErrorType) -> (NewOriginalInput, NewErrorType)>
 
                                 (self,
-                                 retry_map_fn: RetryMapFn,
-                                 fatal_map_fn: FatalMapFn)
+                                 fatal_map_fn: FatalMapFn,
+                                 retry_map_fn: RetryMapFn)
 
                                 -> RetryResult<ReportedInput, NewOriginalInput, Output, NewErrorType> {
         match self {

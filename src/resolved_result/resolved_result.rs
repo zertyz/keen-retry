@@ -177,35 +177,38 @@ ResolvedResult<ReportedInput,
         }
     }
 
-    /// Allows changing the `input` and `errors` of an already resolved (but unsuccessful) operation.\
-    /// A possible usage would be to (logically) move the `input` into the `errors`, so they may contain the
-    /// failed payload -- keep in mind this method allows this to done in a zero-copy manner when compiled in Release Mode.
-    /// This is needed as the `input`, which originally might have been into the `error`, was likely taken out of it for the
-    /// retry process to be kept zero-copy.
-    pub fn map_errors<NewOriginalInput,
-                      NewErrorType:     Debug,
-                      FatalErrorMapFn:  FnOnce(ErrorType, OriginalInput) -> (NewOriginalInput, NewErrorType),
-                      RetryErrorsMapFn: FnMut(ErrorType)                 -> NewErrorType>
+    /// Allows changing the `input` and `errors` of already resolved & unsuccessful operations:
+    ///   - fatal_map_fn(input, fatal_error) -> (new_input, new_fatal_error)
+    ///   - retry_errors_map_fn(retry_error) -> new_retry_error
+    /// 
+    /// Covers the case where it is needed to move the `input` into the fatal `error`, so it may contain the
+    /// failed payload when converted to `Result<>`.
+    /// 
+    /// See also [RetryResult::map_inputs_and_errors()] for similar semantics when you wish to skip retrying.
+    pub fn map_inputs_and_errors<NewOriginalInput,
+                                 NewErrorType,
+                                 FatalMapFn:       FnOnce(OriginalInput, ErrorType) -> (NewOriginalInput, NewErrorType),
+                                 RetryErrorsMapFn: FnMut(ErrorType)                 -> NewErrorType>
 
-                     (self,
-                      fatal_error_map:  FatalErrorMapFn,
-                      retry_errors_map: RetryErrorsMapFn)
+                                (self,
+                                 fatal_map_fn:        FatalMapFn,
+                                 retry_errors_map_fn: RetryErrorsMapFn)
 
-                      -> ResolvedResult<ReportedInput, NewOriginalInput, Output, NewErrorType> {
+                                -> ResolvedResult<ReportedInput, NewOriginalInput, Output, NewErrorType> {
 
         match self {
             ResolvedResult::Ok            { reported_input, output }                               => ResolvedResult::Ok            { reported_input, output },
-            ResolvedResult::Recovered     { reported_input, output, retry_errors } => ResolvedResult::Recovered     { reported_input, output, retry_errors: retry_errors.into_iter().map(retry_errors_map).collect() },
+            ResolvedResult::Recovered     { reported_input, output, retry_errors } => ResolvedResult::Recovered     { reported_input, output, retry_errors: retry_errors.into_iter().map(retry_errors_map_fn).collect() },
             ResolvedResult::Unrecoverable { input, retry_errors, fatal_error }  => {
-                let (new_input, new_fatal_error) = fatal_error_map(fatal_error, input);
-                ResolvedResult::Unrecoverable { input: new_input, retry_errors: retry_errors.into_iter().map(retry_errors_map).collect(), fatal_error: new_fatal_error }
+                let (new_input, new_fatal_error) = fatal_map_fn(input, fatal_error);
+                ResolvedResult::Unrecoverable { input: new_input, retry_errors: retry_errors.into_iter().map(retry_errors_map_fn).collect(), fatal_error: new_fatal_error }
             },
             ResolvedResult::GivenUp { input, retry_errors, fatal_error } => {
-                let (new_input, new_fatal_error) = fatal_error_map(fatal_error, input);
-                ResolvedResult::GivenUp { input: new_input, retry_errors: retry_errors.into_iter().map(retry_errors_map).collect(), fatal_error: new_fatal_error }
+                let (new_input, new_fatal_error) = fatal_map_fn(input, fatal_error);
+                ResolvedResult::GivenUp { input: new_input, retry_errors: retry_errors.into_iter().map(retry_errors_map_fn).collect(), fatal_error: new_fatal_error }
             },
             ResolvedResult::Fatal { input, error } => {
-                let (new_input, new_error) = fatal_error_map(error, input);
+                let (new_input, new_error) = fatal_map_fn(input, error);
                 ResolvedResult::Fatal { input: new_input, error: new_error }
             },
         }
