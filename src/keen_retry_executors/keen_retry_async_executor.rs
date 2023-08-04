@@ -80,7 +80,7 @@ KeenRetryAsyncExecutor<ReportedInput,
     ///     // for a geometric progression with a 1.289 ratio in 13 steps: sleeps from 1 to ~350ms
     ///     .with_delays((1..=13).map(|millis| Duration::from_millis((millis as f64 * 1.289f64.powi(millis)) as u64)))
     ///     .await
-    pub async fn with_delays(self, delays: impl Iterator<Item=Duration> + Send) -> ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType> {
+    pub async fn with_delays(self, delays: impl Iterator<Item=Duration> + Send + Sync) -> ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType> {
         let delays = Arc::new(UnsafeCell::new(delays));
         self.retry_loop(
             move |input, mut retry_errors| {
