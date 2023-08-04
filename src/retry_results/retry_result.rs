@@ -69,24 +69,9 @@ RetryResult<ReportedInput,
         self
     }
 
-    /// Changes the input & output data associated with an operation that was successful at the first shot.
-    ///   - `f(reported_input, output) -> (new_reported_input, new_output)`
-    pub fn map_ok<NewReportedInput,
-                  NewOutput,
-                  F: FnOnce(ReportedInput, Output) -> (NewReportedInput, NewOutput)>
-                 (self, f: F) -> RetryResult<NewReportedInput, OriginalInput, NewOutput, ErrorType> {
-        match self {
-            RetryResult::Retry { input, error }          => RetryResult::Retry { input, error },
-            RetryResult::Fatal { input, error }          => RetryResult::Fatal { input, error },
-            RetryResult::Ok    { reported_input, output } => {
-                let (reported_input, output) = f(reported_input, output);
-                RetryResult::Ok    { reported_input, output }
-            },
-        }
-    }
-
     /// Changes the original input data to be re-fed to an operation that failed and will be retried.
-    ///   - `f(original_input) -> new_original_input`.
+    ///   - `f(original_input) -> new_original_input`.\
+    /// See [Self::map_ok()] if you'd rather change the "reported input" & output of an operation that succeeded/failed fatably.
     ///
     /// A nice usage would be to upgrade the initial payload to a tuple, keeping track of how much time will be spent retrying:
     /// ```nocompile
@@ -101,8 +86,26 @@ RetryResult<ReportedInput,
         }
     }
 
+    /// Changes the input & output data associated with an operation that was successful at the first shot.
+    ///   - `f(reported_input, output) -> (new_reported_input, new_output)`.\
+    /// See [Self::map_input()] if you'd rather change original input instead
+    pub fn map_ok<NewReportedInput,
+                  NewOutput,
+                  F: FnOnce(ReportedInput, Output) -> (NewReportedInput, NewOutput)>
+                 (self, f: F) -> RetryResult<NewReportedInput, OriginalInput, NewOutput, ErrorType> {
+        match self {
+            RetryResult::Retry { input, error }          => RetryResult::Retry { input, error },
+            RetryResult::Fatal { input, error }          => RetryResult::Fatal { input, error },
+            RetryResult::Ok    { reported_input, output } => {
+                let (reported_input, output) = f(reported_input, output);
+                RetryResult::Ok    { reported_input, output }
+            },
+        }
+    }
+
     /// Changes the (value of the) error that indicates this operation may be retried.\
-    /// See [Self::map_errors()] if you'd also like to change the type.
+    /// See [Self::map_errors()] if you'd also like to change the type;\
+    /// See [Self::map_inputs_and_errors()] if you'd like to remap/swap all possible pairs of input/error
     pub fn map_retry_error<F: FnOnce(ErrorType) -> ErrorType>
                           (self, f: F) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType> {
         match self {
@@ -123,19 +126,32 @@ RetryResult<ReportedInput,
         }
     }
 
-    /// Allows changing both the error values & types for an operation that wasn't correctly executed (yet).\
-    /// Other methods are better suited if you want to change just one of the errors -- see [Self::map_retry_error()] & [Self::map_fatal_error()].
-    pub fn map_errors<NewErrorType,
-                      RetryErrorMapFn: FnOnce(ErrorType) -> NewErrorType,
-                      FatalErrorMapFn: FnOnce(ErrorType) -> NewErrorType>
-                     (self,
-                      retry_error_map_fn: RetryErrorMapFn,
-                      fatal_error_map_fn: FatalErrorMapFn)
-                     -> RetryResult<ReportedInput, OriginalInput, Output, NewErrorType> {
+    /// Allows changing the (input,error) pairs for both error possibilities:
+    ///   - retry_map_fn(input, retry_error)       -> (new_input, new_retry_error)
+    ///   - fatal_error_map_fn(input, fatal_error) -> (new_input, new_fatal_error)
+    /// 
+    /// Covers the case where it is desireable to bail out the retrying process of a consumer operation,
+    /// moving the consumed input back to the error, so the caller may not lose the payload.
+    pub fn map_inputs_and_errors<NewOriginalInput,
+                                 NewErrorType,
+                                 RetryMapFn: FnOnce(OriginalInput, ErrorType) -> (NewOriginalInput, NewErrorType),
+                                 FatalMapFn: FnOnce(OriginalInput, ErrorType) -> (NewOriginalInput, NewErrorType)>
+
+                                (self,
+                                 retry_map_fn: RetryMapFn,
+                                 fatal_map_fn: FatalMapFn)
+
+                                -> RetryResult<ReportedInput, NewOriginalInput, Output, NewErrorType> {
         match self {
             RetryResult::Ok    { reported_input, output } => RetryResult::Ok    { reported_input, output },
-            RetryResult::Retry { input, error }          => RetryResult::Retry { input, error: retry_error_map_fn(error) },
-            RetryResult::Fatal { input, error }          => RetryResult::Fatal { input, error: fatal_error_map_fn(error) },
+            RetryResult::Retry { input, error } => {
+                let (new_input, new_error) = retry_map_fn(input, error);
+                RetryResult::Retry { input: new_input, error: new_error }
+            },
+            RetryResult::Fatal { input, error } => {
+                let (new_input, new_error) = fatal_map_fn(input, error);
+                RetryResult::Fatal { input: new_input, error: new_error }
+            },
         }
     }
 

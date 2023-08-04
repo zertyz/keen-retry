@@ -158,6 +158,17 @@ async fn optable_api() -> Result<(), StdErrorType> {
     Ok(())
 }
 
+/// Demonstrates how to bail out of retrying a consumer operation, dropping our custom errors and remapping the the payload to `Result::Err(payload)`
+#[tokio::test]
+async fn bail_out_of_retrying() -> Result<(), StdErrorType> {
+    let socket = Socket::new(1, 11, 1, 2);
+    let result = socket.send_retry("I want this back")
+        .map_inputs_and_errors(|input, _retry_error| ((), input),
+                               |input, _fatal_error| ((), input))
+        .into_result();
+    assert_eq!(result, Err("I want this back"), "mapping inputs and errors didn't work");
+    Ok(())
+}
 
 /// Example of how to implement a retry mechanism free of instrumentation:
 /// In this hypothetical scenario, when connecting, many retryable errors happen until
