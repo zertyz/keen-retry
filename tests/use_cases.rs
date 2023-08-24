@@ -249,11 +249,11 @@ impl Socket {
             // demonstrates how to map the reported input (`loggable_payload` in our case) into the output, so it will be available at final `Ok(loggable_payload)` result
             .map_reported_input_and_output(|reported_input, output| (output, reported_input) )
             // go an extra mile to demonstrate how to place back the payloads of failed requests in `Option<>` field
-            .map_inputs_and_errors(|payload, mut fatal_error| {
-                                       fatal_error.for_payload(|mut_payload| mut_payload.replace(payload));
-                                       ((), fatal_error)
-                                   },
-                                   |ignored| ignored)
+            .map_input_and_errors(|payload, mut fatal_error| {
+                                      fatal_error.for_payload(|mut_payload| mut_payload.replace(payload));
+                                      ((), fatal_error)
+                                  },
+                                  |ignored| ignored)
             .into()
     }
 

@@ -185,7 +185,7 @@ ResolvedResult<ReportedInput,
     /// failed payload when converted to `Result<>`.
     /// 
     /// See also [RetryResult::map_inputs_and_errors()] for similar semantics when you wish to skip retrying.
-    pub fn map_inputs_and_errors<NewOriginalInput,
+    pub fn map_input_and_errors<NewOriginalInput,
                                  NewErrorType,
                                  FatalMapFn:       FnOnce(OriginalInput, ErrorType) -> (NewOriginalInput, NewErrorType),
                                  RetryErrorsMapFn: FnMut(ErrorType)                 -> NewErrorType>

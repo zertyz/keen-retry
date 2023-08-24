@@ -5,9 +5,7 @@
 use crate::{resolved_result::ResolvedResult, RetryResult};
 use std::{
     time::{Duration, SystemTime},
-    sync::Arc,
     future::{Future, self},
-    cell::UnsafeCell,
 };
 
 /// Executes the retry logic according to the chosen backoff algorithm and limits, keeping track of retry metrics;
@@ -80,14 +78,12 @@ KeenRetryAsyncExecutor<ReportedInput,
     ///     // for a geometric progression with a 1.289 ratio in 13 steps: sleeps from 1 to ~350ms
     ///     .with_delays((1..=13).map(|millis| Duration::from_millis((millis as f64 * 1.289f64.powi(millis)) as u64)))
     ///     .await
-    pub async fn with_delays(self, delays: impl Iterator<Item=Duration> + Send + Sync) -> ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType> {
-        let delays = Arc::new(UnsafeCell::new(delays));
+    pub async fn with_delays(self, mut delays: impl Iterator<Item=Duration> + Send + Sync) -> ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType> {
         self.retry_loop(
             move |input, mut retry_errors| {
-                let delays = Arc::clone(&delays);   // to optimize this particular code, one could call `delays.next()` here (out of the async block), to avoid the cloning call on every element. See https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=caf9a95207c982959cec27e15e588244
+                let next_delay = delays.next();
                 async move {
-                    let delays = unsafe { &mut *delays.get() };
-                    match delays.next() {
+                    match next_delay {
                         Some(delay) => {
                             tokio::time::sleep(delay).await;
                             Ok((input, retry_errors))
