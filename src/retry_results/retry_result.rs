@@ -126,7 +126,7 @@ RetryResult<ReportedInput,
         }
     }
 
-    /// Allows changing the (input,error) pairs for both error possibilities:
+    /// Allows changing the (original input,error) pairs for both error possibilities:
     ///   - fatal_map_fn(input, fatal_error) -> (new_input, new_fatal_error)
     ///   - retry_map_fn(input, retry_error) -> (new_input, new_retry_error)
     /// 
@@ -134,7 +134,7 @@ RetryResult<ReportedInput,
     /// moving the consumed input back to the error, so the caller may not lose the payload.
     /// 
     /// See also [ResolvedResult::map_inputs_and_errors()] for similar semantics after exhausting retries.
-    pub fn map_inputs_and_errors<NewOriginalInput,
+    pub fn map_input_and_errors<NewOriginalInput,
                                  NewErrorType,
                                  FatalMapFn: FnOnce(OriginalInput, ErrorType) -> (NewOriginalInput, NewErrorType),
                                  RetryMapFn: FnOnce(OriginalInput, ErrorType) -> (NewOriginalInput, NewErrorType)>
