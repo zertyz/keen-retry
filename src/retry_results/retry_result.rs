@@ -9,7 +9,7 @@ use std::future::Future;
 
 /// Wrapper for the return type of fallible & retryable functions -- an extension for `Result<OkPayload, ErrorType>`,
 /// but also accepting an `input`.\
-/// Considering zero-copy, both `Retry` & `Fatal` variants will contain the original input payload, which is consumed by an `Ok` operation;
+/// Considering zero-copy, both `Transient` & `Fatal` variants will contain the original input payload, which is consumed by an `Ok` operation;
 /// The `Ok` operation, on the other hand, has the outcome result.
 pub enum RetryResult<ReportedInput,
                      OriginalInput,
@@ -20,7 +20,7 @@ pub enum RetryResult<ReportedInput,
         output:         Output,
     },
 
-    Retry {
+    Transient {
         input: OriginalInput,
         error: ErrorType,
     },
@@ -49,16 +49,16 @@ RetryResult<ReportedInput,
         self
     }
 
-    pub fn inspect_retry<IgnoredReturn,
-                         F: FnOnce(&OriginalInput, &ErrorType) -> IgnoredReturn>
-                        (self, f: F) -> Self {
-        if let Self::Retry { input: ref payload, ref error } = self {
+    pub fn inspect_transient<IgnoredReturn,
+                             F: FnOnce(&OriginalInput, &ErrorType) -> IgnoredReturn>
+                            (self, f: F) -> Self {
+        if let Self::Transient { input: ref payload, ref error } = self {
             f(payload, error);
         }
         self
     }
 
-    /// Spots on the data of an operation that failed fatably on the first shot (in which case, no retrying will be attempted).
+    /// Spots on the data of an operation that failed fatably (in which case, no retrying will be attempted).
     ///   - `f(&original_input, &error_type)`
     pub fn inspect_fatal<IgnoredReturn,
                          F: FnOnce(&OriginalInput, &ErrorType) -> IgnoredReturn>
@@ -80,13 +80,13 @@ RetryResult<ReportedInput,
                      F: FnOnce(OriginalInput) -> NewOriginalInput>
                     (self, f: F) -> RetryResult<ReportedInput, NewOriginalInput, Output, ErrorType> {
         match self {
-            RetryResult::Ok    { reported_input, output } => RetryResult::Ok    { reported_input, output },
-            RetryResult::Retry { input, error }          => RetryResult::Retry { input: f(input), error },
-            RetryResult::Fatal { input, error }          => RetryResult::Fatal { input: f(input), error },
+            RetryResult::Ok        { reported_input, output } => RetryResult::Ok        { reported_input, output },
+            RetryResult::Transient { input, error }        => RetryResult::Transient { input: f(input), error },
+            RetryResult::Fatal     { input, error }        => RetryResult::Fatal     { input: f(input), error },
         }
     }
 
-    /// Changes the input & output data associated with an operation that was successful at the first shot.
+    /// Changes the input & output data associated with an operation that was successful.
     ///   - `f(reported_input, output) -> (new_reported_input, new_output)`.\
     /// See [Self::map_input()] if you'd rather change original input instead
     pub fn map_ok<NewReportedInput,
@@ -94,9 +94,9 @@ RetryResult<ReportedInput,
                   F: FnOnce(ReportedInput, Output) -> (NewReportedInput, NewOutput)>
                  (self, f: F) -> RetryResult<NewReportedInput, OriginalInput, NewOutput, ErrorType> {
         match self {
-            RetryResult::Retry { input, error }          => RetryResult::Retry { input, error },
-            RetryResult::Fatal { input, error }          => RetryResult::Fatal { input, error },
-            RetryResult::Ok    { reported_input, output } => {
+            RetryResult::Transient { input, error }        => RetryResult::Transient { input, error },
+            RetryResult::Fatal     { input, error }        => RetryResult::Fatal     { input, error },
+            RetryResult::Ok        { reported_input, output } => {
                 let (reported_input, output) = f(reported_input, output);
                 RetryResult::Ok    { reported_input, output }
             },
@@ -106,29 +106,31 @@ RetryResult<ReportedInput,
     /// Changes the (value of the) error that indicates this operation may be retried.\
     /// See [Self::map_errors()] if you'd also like to change the type;\
     /// See [Self::map_inputs_and_errors()] if you'd like to remap/swap all possible pairs of input/error
-    pub fn map_retry_error<F: FnOnce(ErrorType) -> ErrorType>
-                          (self, f: F) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType> {
+    pub fn map_transient_error<F: FnOnce(ErrorType) -> ErrorType>
+                              (self, f: F)
+                              -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType> {
         match self {
-            RetryResult::Ok    { reported_input, output }  => RetryResult::Ok    { reported_input, output },
-            RetryResult::Retry { input, error }           => RetryResult::Retry { input, error: f(error) },
-            RetryResult::Fatal { input, error }           => RetryResult::Fatal { input, error },
+            RetryResult::Ok        { reported_input, output }  => RetryResult::Ok        { reported_input, output },
+            RetryResult::Transient { input, error }         => RetryResult::Transient { input, error: f(error) },
+            RetryResult::Fatal     { input, error }         => RetryResult::Fatal     { input, error },
         }
     }
 
     /// Changes the (value of the) error that indicates this operation may not be retried.\
     /// See [Self::map_errors()] if you'd also like to change the type.
     pub fn map_fatal_error<F: FnOnce(ErrorType) -> ErrorType>
-                          (self, f: F) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType> {
+                          (self, f: F)
+                          -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType> {
         match self {
-            RetryResult::Ok    { reported_input, output } => RetryResult::Ok    { reported_input, output },
-            RetryResult::Retry { input, error }          => RetryResult::Retry { input, error },
-            RetryResult::Fatal { input, error }          => RetryResult::Fatal { input, error: f(error) },
+            RetryResult::Ok        { reported_input, output } => RetryResult::Ok        { reported_input, output },
+            RetryResult::Transient { input, error }        => RetryResult::Transient { input, error },
+            RetryResult::Fatal     { input, error }        => RetryResult::Fatal     { input, error: f(error) },
         }
     }
 
     /// Allows changing the (original input,error) pairs for both error possibilities:
-    ///   - fatal_map_fn(input, fatal_error) -> (new_input, new_fatal_error)
-    ///   - retry_map_fn(input, retry_error) -> (new_input, new_retry_error)
+    ///   - fatal_map_fn(input, fatal_error)         -> (new_input, new_fatal_error)
+    ///   - transient_map_fn(input, transient_error) -> (new_input, new_transient_error)
     /// 
     /// Covers the case where it is desireable to bail out the retrying process of a consumer operation,
     /// moving the consumed input back to the error, so the caller may not lose the payload.
@@ -136,19 +138,19 @@ RetryResult<ReportedInput,
     /// See also [ResolvedResult::map_inputs_and_errors()] for similar semantics after exhausting retries.
     pub fn map_input_and_errors<NewOriginalInput,
                                  NewErrorType,
-                                 FatalMapFn: FnOnce(OriginalInput, ErrorType) -> (NewOriginalInput, NewErrorType),
-                                 RetryMapFn: FnOnce(OriginalInput, ErrorType) -> (NewOriginalInput, NewErrorType)>
+                                 FatalMapFn:     FnOnce(OriginalInput, ErrorType) -> (NewOriginalInput, NewErrorType),
+                                 TransientMapFn: FnOnce(OriginalInput, ErrorType) -> (NewOriginalInput, NewErrorType)>
 
                                 (self,
-                                 fatal_map_fn: FatalMapFn,
-                                 retry_map_fn: RetryMapFn)
+                                 fatal_map_fn:     FatalMapFn,
+                                 transient_map_fn: TransientMapFn)
 
                                 -> RetryResult<ReportedInput, NewOriginalInput, Output, NewErrorType> {
         match self {
-            RetryResult::Ok    { reported_input, output } => RetryResult::Ok    { reported_input, output },
-            RetryResult::Retry { input, error } => {
-                let (new_input, new_error) = retry_map_fn(input, error);
-                RetryResult::Retry { input: new_input, error: new_error }
+            RetryResult::Ok        { reported_input, output } => RetryResult::Ok    { reported_input, output },
+            RetryResult::Transient { input, error }        => {
+                let (new_input, new_error) = transient_map_fn(input, error);
+                RetryResult::Transient { input: new_input, error: new_error }
             },
             RetryResult::Fatal { input, error } => {
                 let (new_input, new_error) = fatal_map_fn(input, error);
@@ -164,9 +166,9 @@ RetryResult<ReportedInput,
                      -> KeenRetryExecutor<ReportedInput, OriginalInput, Output, ErrorType, RetryFn> {
 
         match self {
-            RetryResult::Ok    { reported_input, output } => KeenRetryExecutor::from_ok_result(reported_input, output),
-            RetryResult::Fatal { input, error }          => KeenRetryExecutor::from_err_result(input, error),
-            RetryResult::Retry { input, error }          => KeenRetryExecutor::new(input, retry_operation, error),
+            RetryResult::Ok        { reported_input, output } => KeenRetryExecutor::from_ok_result(reported_input, output),
+            RetryResult::Fatal     { input, error }        => KeenRetryExecutor::from_err_result(input, error),
+            RetryResult::Transient { input, error }        => KeenRetryExecutor::new(input, retry_operation, error),
         }
     }
 
@@ -178,22 +180,33 @@ RetryResult<ReportedInput,
                            -> KeenRetryAsyncExecutor<ReportedInput, OriginalInput, Output, ErrorType, AsyncRetryFn, OutputFuture> {
 
         match self {
-            RetryResult::Ok    { reported_input, output } => KeenRetryAsyncExecutor::from_ok_result(reported_input, output),
-            RetryResult::Fatal { input, error }          => KeenRetryAsyncExecutor::from_err_result(input, error),
-            RetryResult::Retry { input, error }          => KeenRetryAsyncExecutor::new(input, retry_operation, error),
+            RetryResult::Ok        { reported_input, output } => KeenRetryAsyncExecutor::from_ok_result(reported_input, output),
+            RetryResult::Fatal     { input, error }        => KeenRetryAsyncExecutor::from_err_result(input, error),
+            RetryResult::Transient { input, error }        => KeenRetryAsyncExecutor::new(input, retry_operation, error),
         }
     }
 
+    /// Returns `true` if the operation succeeded.
+    /// Also mimmics the `Result<>` API for users that don't opt-in for the `keen-retry` API.
     pub fn is_ok(&self) -> bool {
         matches!(self, RetryResult::Ok {..})
     }
 
+    /// Returns `true` if the operation failed fatably
     pub fn is_fatal(&self) -> bool {
         matches!(self, RetryResult::Fatal {..})
     }
 
-    pub fn is_retry(&self) -> bool {
-        matches!(self, RetryResult::Retry {..})
+    /// Returns `true` if the operation resulted in a transient error,
+    /// electing the same input(s) for a retry.\
+    pub fn is_transient(&self) -> bool {
+        matches!(self, RetryResult::Transient {..})
+    }
+
+    /// Mimmics the `Result<>` API for users that don't opt-in for the `keen-retry` API:
+    /// simply returns `true` if the error is [Self::Fatal] or [Self::Transient].
+    pub fn is_err(&self) -> bool {
+        self.is_transient() || self.is_fatal()
     }
 
     pub fn expect_ok(&self, panic_msg: &str) {
@@ -208,8 +221,8 @@ RetryResult<ReportedInput,
         }
     }
 
-    pub fn expect_retry(&self, panic_msg: &str) {
-        if !self.is_retry() {
+    pub fn expect_transient(&self, panic_msg: &str) {
+        if !self.is_transient() {
             panic!("{panic_msg}")
         }
     }
@@ -232,13 +245,13 @@ From<RetryResult<ReportedInput,
      ErrorType>> for
 Result<Output, ErrorType> {
 
-    /// Opts out of any retrying attempts and converts the "first shot" of a retryable operation into a `Result<>`.\
-    /// To opt-in the retrying process, see [RetryResult::retry_with()] or [RetryResult::retry_with_async()]
+    /// Opts out of any retrying attempts and converts this, potentially retryable result, into a standard Rust `Result<>`.\
+    /// To opt-in for the retrying process, see [RetryResult::retry_with()] or [RetryResult::retry_with_async()]
     fn from(retry_result: RetryResult<ReportedInput, OriginalInput, Output, ErrorType>) -> Self {
         match retry_result {
-            RetryResult::Ok { reported_input: _, output }            => Ok(output),
-            RetryResult::Fatal { input: _, error }                => Err(error),
-            RetryResult::Retry { input: _, error }                => Err(error),
+            RetryResult::Ok { reported_input: _, output }    => Ok(output),
+            RetryResult::Fatal { input: _, error }        => Err(error),
+            RetryResult::Transient { input: _, error }    => Err(error),
         }
     }
 }

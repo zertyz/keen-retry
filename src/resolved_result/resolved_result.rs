@@ -55,6 +55,14 @@ ResolvedResult<ReportedInput,
         ResolvedResult::Fatal { input: original_input, error }
     }
 
+    pub fn is_success(&self) -> bool {
+        matches!(self, Self::Ok { .. } | Self::Recovered { .. })
+    }
+
+    pub fn is_failure(&self) -> bool {
+        !self.is_success()
+    }
+
     pub fn inspect_ok<IgnoredReturn,
                       F: FnOnce(&ReportedInput, &Output) -> IgnoredReturn>
                      (self, f: F) -> Self {
@@ -128,11 +136,11 @@ ResolvedResult<ReportedInput,
         }
     }
 
-    /// Allows changing the reported input data of an already resolved (and unsuccessful) operation.\
-    /// A successful operation is likely to consume the input and the `reported_input` is expected, if desirable,
-    /// to be a lightweight representation of it -- lets say, for instrumentation purposes.\
+    /// Allows changing the reported input data of an already resolved (and successful) operation.\
+    /// A successful operation is likely to consume the input and the `reported_input` is expected to be a 
+    /// lightweight representation of it -- lets say, for instrumentation purposes -- so a copy doesn't need to be made.\
     /// This method allows a laden `reported_input` to be downgraded to its original form, where:
-    ///   - `f(reported_input) -> new_reported_input`.
+    ///   - `f(changed_reported_input) -> original_reported_input`.
     ///
     /// Example:
     /// ```nocompile
@@ -142,11 +150,11 @@ ResolvedResult<ReportedInput,
                               F: FnOnce(ReportedInput) -> NewReportedInput>
                              (self, f: F) -> ResolvedResult<NewReportedInput, OriginalInput, Output, ErrorType> {
         match self {
-            ResolvedResult::Ok            { reported_input, output }                              => ResolvedResult::Ok            { reported_input: f(reported_input), output },
+            ResolvedResult::Ok            { reported_input, output }                                => ResolvedResult::Ok            { reported_input: f(reported_input), output },
             ResolvedResult::Fatal         { input, error}                                        => ResolvedResult::Fatal         { input, error },
             ResolvedResult::Recovered     { reported_input, output, retry_errors }  => ResolvedResult::Recovered     { reported_input: f(reported_input), output, retry_errors },
-            ResolvedResult::GivenUp       { input, retry_errors, fatal_error }     => ResolvedResult::GivenUp       { input, retry_errors, fatal_error },
-            ResolvedResult::Unrecoverable { input, retry_errors, fatal_error }     => ResolvedResult::Unrecoverable { input, retry_errors, fatal_error },
+            ResolvedResult::GivenUp       { input, retry_errors, fatal_error }   => ResolvedResult::GivenUp       { input, retry_errors, fatal_error },
+            ResolvedResult::Unrecoverable { input, retry_errors, fatal_error }   => ResolvedResult::Unrecoverable { input, retry_errors, fatal_error },
         }
     }
 
@@ -162,7 +170,7 @@ ResolvedResult<ReportedInput,
                                          F: FnOnce(ReportedInput, Output) -> (NewReportedInput, NewOutput)>
                                         (self, f: F) -> ResolvedResult<NewReportedInput, OriginalInput, NewOutput, ErrorType> {
         match self {
-            ResolvedResult::Fatal         { input, error}                                    => ResolvedResult::Fatal         { input, error },
+            ResolvedResult::Fatal         { input, error}                                      => ResolvedResult::Fatal         { input, error },
             ResolvedResult::GivenUp       { input, retry_errors, fatal_error } => ResolvedResult::GivenUp       { input, retry_errors, fatal_error },
             ResolvedResult::Unrecoverable { input, retry_errors, fatal_error } => ResolvedResult::Unrecoverable { input, retry_errors, fatal_error },
 
@@ -214,6 +222,12 @@ ResolvedResult<ReportedInput,
         }
     }
 
+    /// Syntatic sugar for [Result<Output, ErrorType>::from()].\
+    /// See also [Self::into()]
+    pub fn into_result(self) -> Result::<Output, ErrorType> {
+        Result::<Output, ErrorType>::from(self)
+    }
+
 }
 
 impl<ReportedInput,
@@ -237,6 +251,7 @@ Result<Output, ErrorType> {
         }
     }
 }
+
 
 use std::{
     fmt::Debug,

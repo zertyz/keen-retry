@@ -1,6 +1,6 @@
 [package]
 name = "keen-retry"
-version = "0.2.3"
+version = "0.3.0"
 edition = "2021"
 description   = "A simple -- yet powerful -- zero-cost-abstractions & zero-copy lib for error handling & recovery"
 keywords      = ["functional", "zero-copy", "zero-cost", "async", "performance"]
@@ -21,6 +21,7 @@ license       = "Unlicense"
 [dependencies]
 futures = "0.3"
 tokio = { version = "1", features = ["full"] }
+rand = "0.8"
 
 
 [dev-dependencies]

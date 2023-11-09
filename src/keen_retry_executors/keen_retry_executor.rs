@@ -5,8 +5,9 @@
 use crate::{
     resolved_result::ResolvedResult,
     RetryResult,
+    keen_retry_executors::common, ExponentialJitter,
 };
-use std::time::{Duration, SystemTime};
+use std::{time::{Duration, SystemTime}, ops::RangeInclusive};
 
 /// Executes the retry logic according to the chosen backoff algorithm and limits, keeping track of retry metrics;
 pub enum KeenRetryExecutor<ReportedInput,
@@ -67,29 +68,76 @@ KeenRetryExecutor<ReportedInput,
         Self::ResolvedErr { original_input, error }
     }
 
+    /// The recommended backoff strategy when retrying operations that consume external / shared resources -- such as network services.
+    /// This strategy delays each attempt by a growing duration + a random component, so to avoid the "thundering herd problem".
+    /// Moreover, it allows the first retry to be done immediately, if the `range_millis` starts with zero -- this assumes any failures
+    /// are rare and may be handled immedialy by another node upon retrying. If this doesn't hold true, further re-attempts will be delayed.\
+    /// Calling this method upgrades this [KeenRetryExecutor] into the final [ResolvedResult].\
+    /// See also:
+    ///   * [Self::spinning_forever()] or [Self::spinning_until_timeout()] for retrying local operations;
+    ///   * [Self::with_delays()] for custom backoffs.
+    pub fn with_exponential_jitter(self,
+                                   config: ExponentialJitter<ErrorType>)
+                                  -> ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType> {
+        match config {
+        
+            ExponentialJitter::FromBackoffRange {
+                backoff_range_millis,
+                re_attempts,
+                jitter_ratio,
+            } => self.with_delays(common::exponential_jitter_from_range(backoff_range_millis, re_attempts, jitter_ratio)),
+
+            ExponentialJitter::UpToTimeout {
+                initial_backoff_millis,
+                expoent,
+                re_attempts,
+                jitter_ratio,
+                timeout,
+                timeout_error,
+             } => self.with_delays_and_timeout(common::exponential_jitter_from_expoent(initial_backoff_millis, expoent, re_attempts, jitter_ratio), timeout, Some(timeout_error)),
+        }
+    }
+
     /// Upgrades this [KeenRetryExecutor] into the final [ResolvedResult], possibly executing the `retry_operation` as many times as
     /// there are elements in `delays`, sleeping for the indicated amount on each attempt
-    /// See also [Self::spinning_forever()]
+    /// See also [Self::with_exponential_jitter()], [Self::spinning_forever()]
     /// Example:
     /// ```nocompile
     ///     // for an arithmetic progression in the sleeping times:
     ///     .with_delays((100..=1000).step_by(100).map(|millis| Duration::from_millis(millis)))
     ///     // for a geometric progression with a 1.289 ratio in 13 steps: sleeps from 1 to ~350ms
-    ///     .with_delays((1..=13).map(|millis| Duration::from_millis((millis as f64 * 1.289f64.powi(millis)) as u64)))
-    pub fn with_delays(self, mut delays: impl Iterator<Item=Duration>) -> ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType> {
+    ///     .with_delays((1..=13).map(|millis| Duration::from_millis(1.289f64.powi(millis)) as u64))
+    pub fn with_delays(self, delays: impl Iterator<Item=Duration>) -> ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType> {
+        self.with_delays_and_timeout(delays, Duration::ZERO, None)
+    }
+
+    /// Similar to [Self::with_delays()], but enforces a timeout for the whole retrying process -- useful for nested retry operations, which may quickly scale up.\
+    /// If `timeout_error` is `None`, no timeout is enforced and this method behaves exactly like [Self::with_delays()]
+    pub fn with_delays_and_timeout(self,
+                                   mut delays:        impl Iterator<Item=Duration>,
+                                   timeout:           Duration,
+                                   mut timeout_error: Option<ErrorType>)
+                                  -> ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType> {
+        let start = if timeout_error.is_none() { SystemTime::UNIX_EPOCH } else { SystemTime::now() };
         self.retry_loop(
             move |input, mut retry_errors| {
                 match delays.next() {
                     Some(delay) => {
-                        std::thread::sleep(delay);
-                        Ok((input, retry_errors))
+                        if timeout_error.is_some() && start.elapsed().unwrap_or_default() >= timeout - delay {
+                            Err(ResolvedResult::GivenUp { input, retry_errors, fatal_error: timeout_error.take().unwrap() })
+                        } else {
+                            if delay > Duration::ZERO {
+                                std::thread::sleep(delay);
+                            }
+                            Ok((input, retry_errors))
+                        }
                     },
                     None => {
                         // retries exhausted without success: report as `GivenUp` (unless the number of retries was 0)
                         let fatal_error = retry_errors.pop();
                         match fatal_error {
                             Some(fatal_error) => Err(ResolvedResult::GivenUp { input, retry_errors, fatal_error }),
-                            None                        => panic!("BUG! the `keen-retry` crate has a bug in the way it start retries: a retry can only be created with the first retryable error having been registered"),
+                            None                         => panic!("BUG! the `keen-retry` crate has a bug in the way it start retries: a retry can only be created with the first retryable error having been registered"),
                         }
                     },
                 }
@@ -98,9 +146,10 @@ KeenRetryExecutor<ReportedInput,
         )
     }
 
-    /// Designed for really fast `retry_operation`s, upgrades this [KeenRetryAsyncExecutor] into the final [ResolvedResult], executing the `retry_operation`
-    /// until it either succeeds or fatably fails, relaxing the CPU on each attempt -- but not context-switching nor giving `tokio` a change to run other tasks.\
-    /// See also [Self::with_delays()]
+    /// Designed for really fast `retry_operation`s, providing the lowest possible latency, upgrades this [KeenRetryAsyncExecutor] into the final [ResolvedResult],
+    /// executing the `retry_operation` until it either succeeds or fatably fails, relaxing the CPU on each attempt, without context-switching.\
+    /// Use with caution, as this method may dead-lock the thread, at 100% CPU usage, as there is no limit for the number of retries.\
+    /// See also [Self::spinning_until_timeout()] and [Self::with_delays()]
     pub fn spinning_forever(self) -> ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType> {
         self.retry_loop(
             |input, retry_errors| {
@@ -118,8 +167,9 @@ KeenRetryExecutor<ReportedInput,
     /// Upgrades this [KeenRetryExecutor] into the final [ResolvedResult], executing the `retry_operation`
     /// until it either succeeds (or fatably fails) or `timeout` elapses -- in which case, the operation will fail
     /// with the error given by `timeout_error`.\
-    /// Upon each new attempt, some time will be spent in the CPU Relaxed state & a context switch is likely to happen (to fetch the time)
-    /// -- since the CPU usage will still be 100%, using this method is recommended only for very short durations (<~100ms).
+    /// Upon each new attempt, some time will be spent in the CPU Relaxed state & a context switch is likely to happen, due to fetching the time.
+    /// -- since the CPU usage will still be 100%, using this method is recommended only for very short durations (<~100ms).\
+    /// See also [Self::spinning_forever()] and [Self::with_delays()]
     pub fn spinning_until_timeout(self,
                                   timeout:       Duration,
                                   timeout_error: ErrorType)
@@ -133,7 +183,7 @@ KeenRetryExecutor<ReportedInput,
                 std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop();
                 std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop();
                 std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop();
-                if start.elapsed().expect("keen_retry: error determining the elapsed time") >= timeout {
+                if start.elapsed().unwrap_or_default() >= timeout {
                     Err(ResolvedResult::GivenUp { input, retry_errors, fatal_error: timeout_error.take().unwrap() })
                 } else {
                     Ok((input, retry_errors))
@@ -169,7 +219,7 @@ KeenRetryExecutor<ReportedInput,
                             match new_retry_result {
                                 RetryResult::Ok    { reported_input, output } => break ResolvedResult::Recovered { reported_input, output, retry_errors },
                                 RetryResult::Fatal { input, error }          => break ResolvedResult::Unrecoverable { input, retry_errors, fatal_error: error },
-                                RetryResult::Retry { input, error }          => {
+                                RetryResult::Transient { input, error }          => {
                                     on_non_fatal_failure(&input, error, &mut retry_errors);
                                     (input, retry_errors)
                                 },
