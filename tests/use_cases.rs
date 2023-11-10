@@ -1,4 +1,4 @@
-//! Demonstrates how the `keen-retry` library can be integrated with the Rust's original `Result<O,E>` API.
+//! Demonstrates how the `keen-retry` library can be integrated back and forth with the Rust's original `Result<O,E>` API.
 //! 
 //! Shows all possible use cases in which retries could be useful (both sync & async):
 //!   - using all the zero-cost-abstraction for retry instrumentation features
@@ -253,13 +253,6 @@ pub async fn keen_send<T: Debug + PartialEq>
         .into_result()
 }
 
-/// Overrides the original method
-/// Proves the `keen-retry` API is optable... you may not recruit any of its features
-/// (in this case, the behavior will be identical to `Result<>`)
-pub fn _receive(socket: &Socket) -> Result<&'static str, TransportErrors<&'static str>> {
-    socket.receive_retry()
-        .into_result()     // actually, this is the only needed part to convert between the `keen-retry` API and `Result<>` -- but notice there is no `.retry_with()` here
-}
 
 /// A more realistic demonstration of a possible real usage of the `keen-retry` API (in opposition to the fully fledged one in [keen_send()]).\
 /// Here, apart from the retrying logic & constraints, you will find detailed instrumentation with measurements for the time spent in

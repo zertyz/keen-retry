@@ -1,5 +1,5 @@
-//! This module mocks an external library that uses the `keen-retry` Library API, where our
-//! fictitius library is able to simulate success, transient and fatal failures, akin to [crate::RetryResult],
+//! This module simulates an external library that uses the `keen-retry` Library API, where our
+//! fictitius library is able to succeed, and transiently / fatally fail, akin to [crate::RetryResult],
 //! which constitutes the core of the `keen-retry` Library API.
 //! 
 //! Here you will see the recommended Patterns for adding `keen-retry` support to your own library.

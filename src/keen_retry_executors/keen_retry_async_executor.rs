@@ -9,7 +9,7 @@ use crate::{
 };
 use std::{
     time::{Duration, SystemTime},
-    future::{Future, self}, ops::RangeInclusive,
+    future::{Future, self},
 };
 
 /// Executes the retry logic according to the chosen backoff algorithm and limits, keeping track of retry metrics;
@@ -128,12 +128,12 @@ KeenRetryAsyncExecutor<ReportedInput,
         self.retry_loop(
             move |input, mut retry_errors| {
                 let next_delay = delays.next();
-                let timeout_error = timeout_error.take();
+                let mut timeout_error = timeout_error.take();
                 async move {
                     match next_delay {
                         Some(delay) => {
                             if timeout_error.is_some() && start.elapsed().unwrap_or_default() >= timeout - delay {
-                                Err(ResolvedResult::GivenUp { input, retry_errors, fatal_error: timeout_error.unwrap() })
+                                Err(ResolvedResult::GivenUp { input, retry_errors, fatal_error: timeout_error.take().unwrap() })
                             } else {
                                 if delay > Duration::ZERO {
                                     tokio::time::sleep(delay).await;

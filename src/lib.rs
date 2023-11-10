@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 
-mod retry_results;
-pub use retry_results::*;
+mod retry_result;
+pub use retry_result::*;
 
 mod keen_retry_executors;
 pub use keen_retry_executors::*;

@@ -7,7 +7,8 @@ use crate::{
     RetryResult,
     keen_retry_executors::common, ExponentialJitter,
 };
-use std::{time::{Duration, SystemTime}, ops::RangeInclusive};
+use std::time::{Duration, SystemTime};
+
 
 /// Executes the retry logic according to the chosen backoff algorithm and limits, keeping track of retry metrics;
 pub enum KeenRetryExecutor<ReportedInput,

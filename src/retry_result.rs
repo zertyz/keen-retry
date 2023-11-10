@@ -1,5 +1,4 @@
-//! Resting place for [RetryResult]
-
+//! Resting place for [RetryResult] and associated sugar types [RetryProcedureResult], [RetryConsumerResult] and [RetryProcedureResult].
 
 use crate::{
     keen_retry_executor::KeenRetryExecutor,
@@ -7,24 +6,48 @@ use crate::{
 };
 use std::future::Future;
 
-/// Wrapper for the return type of fallible & retryable functions -- an extension for `Result<OkPayload, ErrorType>`,
-/// but also accepting an `input`.\
+
+// Some suggar types:
+// //////////////////
+
+/// Suggar type for when an operation doesn't consume its inputs nor produce outputs
+pub type RetryProcedureResult<ErrorType> = RetryResult<(), (), (), ErrorType>;
+
+/// Suggar type for when an operation doesn't produce outputs
+pub type RetryConsumerResult<ReportedInput, OriginalInput, ErrorType> = RetryResult<ReportedInput, OriginalInput, (), ErrorType>;
+
+/// Suggar type for when an operation doesn't consume its inputs
+pub type RetryProducerResult<Output, ErrorType> = RetryResult<(), (), Output, ErrorType>;
+
+
+/// An extension over the original std `Result<Ok, Err>`, introducing a third kind: Transient failures
+/// -- which are elligible for retry attempts: this may be considered the "First Level" of results,
+/// mapping directly from raw operation results.\
 /// Considering zero-copy, both `Transient` & `Fatal` variants will contain the original input payload, which is consumed by an `Ok` operation;
-/// The `Ok` operation, on the other hand, has the outcome result.
+/// The `Ok` operation, on the other hand, has the outcome result and may have an excerpt of the input, for instrumentation purposes.\
+/// See also [crate::RetryResult], for the "Second Level" of results -- after passing through some possible retry re-attempts.
 pub enum RetryResult<ReportedInput,
                      OriginalInput,
                      Output,
                      ErrorType> {
+
+    /// Represents the result of an operation that succeeded.\
+    /// Maps to a `Result::Ok`.
     Ok {
         reported_input: ReportedInput,
         output:         Output,
     },
 
+    /// Represents the result of an operation that faced a transient error
+    /// -- which are elligible for retrying.\
+    /// Maps to a `Result::Err` if not opting-in for the retrying procedure.
     Transient {
         input: OriginalInput,
         error: ErrorType,
     },
 
+    /// Represents the result of an operation that faced a fatal error.\
+    /// Maps to a `Result::Err`.
     Fatal {
         input: OriginalInput,
         error: ErrorType,
@@ -40,6 +63,7 @@ RetryResult<ReportedInput,
             Output,
             ErrorType> {
 
+    /// If this operation is [Self::Ok], spots its data by calling `f(&reported_input, &output)`
     pub fn inspect_ok<IgnoredReturn,
                                   F: FnOnce(&ReportedInput, &Output) -> IgnoredReturn>
                                  (self, f: F) -> Self {
@@ -49,6 +73,7 @@ RetryResult<ReportedInput,
         self
     }
 
+    /// If this operation is [Self::Transient], spots its data by calling `f(&original_input, &error)`
     pub fn inspect_transient<IgnoredReturn,
                              F: FnOnce(&OriginalInput, &ErrorType) -> IgnoredReturn>
                             (self, f: F) -> Self {
@@ -71,7 +96,7 @@ RetryResult<ReportedInput,
 
     /// Changes the original input data to be re-fed to an operation that failed and will be retried.
     ///   - `f(original_input) -> new_original_input`.\
-    /// See [Self::map_ok()] if you'd rather change the "reported input" & output of an operation that succeeded/failed fatably.
+    /// See [Self::map_ok()] if you'd rather change the "reported input" & output of an operation that succeeded.
     ///
     /// A nice usage would be to upgrade the initial payload to a tuple, keeping track of how much time will be spent retrying:
     /// ```nocompile
@@ -159,7 +184,8 @@ RetryResult<ReportedInput,
         }
     }
 
-    /// Upgrades this [RetryResult] into a [KeenRetryExecutor], which will, on its turn, be upgraded to [ResolvedResult], containing the final results after executing the retryable operation
+    /// Upgrades this [RetryResult] into a [KeenRetryExecutor], which will, on its turn, be upgraded to [crate::ResolvedResult],
+    /// containing the final results after executing the retrying process
     pub fn retry_with<RetryFn: FnMut(OriginalInput) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>
                      (self,
                       retry_operation: RetryFn)
@@ -172,7 +198,8 @@ RetryResult<ReportedInput,
         }
     }
 
-    /// Upgrades this [RetryResult] into a [KeenRetryAsyncExecutor], which will, on its turn, be upgraded to [ResolvedResult], containing the final results after executing the retryable operation
+    /// Upgrades this [RetryResult] into a [KeenRetryAsyncExecutor], which will, on its turn, be upgraded to [crate::ResolvedResult],
+    /// containing the final results after executing the retrying process
     pub fn retry_with_async<AsyncRetryFn: FnMut(OriginalInput) -> OutputFuture,
                             OutputFuture: Future<Output=RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>>
                            (self,
@@ -186,10 +213,16 @@ RetryResult<ReportedInput,
         }
     }
 
-    /// Returns `true` if the operation succeeded.
+    /// Returns `true` if the operation succeeded.\
     /// Also mimmics the `Result<>` API for users that don't opt-in for the `keen-retry` API.
     pub fn is_ok(&self) -> bool {
         matches!(self, RetryResult::Ok {..})
+    }
+
+    /// Mimmics the `Result<>` API for users that don't opt-in for the `keen-retry` API:
+    /// simply returns `true` if the error is [Self::Fatal] or [Self::Transient].
+    pub fn is_err(&self) -> bool {
+        self.is_transient() || self.is_fatal()
     }
 
     /// Returns `true` if the operation failed fatably
@@ -203,26 +236,23 @@ RetryResult<ReportedInput,
         matches!(self, RetryResult::Transient {..})
     }
 
-    /// Mimmics the `Result<>` API for users that don't opt-in for the `keen-retry` API:
-    /// simply returns `true` if the error is [Self::Fatal] or [Self::Transient].
-    pub fn is_err(&self) -> bool {
-        self.is_transient() || self.is_fatal()
-    }
-
+    /// Panics if `self` isn't [RetryResult::Ok]
     pub fn expect_ok(&self, panic_msg: &str) {
         if !self.is_ok() {
             panic!("{panic_msg}")
         }
     }
 
-    pub fn expect_fatal(&self, panic_msg: &str) {
-        if !self.is_fatal() {
+    /// Panics if `self` isn't [RetryResult::Transient]
+    pub fn expect_transient(&self, panic_msg: &str) {
+        if !self.is_transient() {
             panic!("{panic_msg}")
         }
     }
 
-    pub fn expect_transient(&self, panic_msg: &str) {
-        if !self.is_transient() {
+    /// Panics if `self` isn't [RetryResult::Fatal]
+    pub fn expect_fatal(&self, panic_msg: &str) {
+        if !self.is_fatal() {
             panic!("{panic_msg}")
         }
     }
@@ -245,7 +275,7 @@ From<RetryResult<ReportedInput,
      ErrorType>> for
 Result<Output, ErrorType> {
 
-    /// Opts out of any retrying attempts and converts this, potentially retryable result, into a standard Rust `Result<>`.\
+    /// Opts out of any retrying attempts and downgrades this, potentially retryable result, into a standard Rust `Result<>`.\
     /// To opt-in for the retrying process, see [RetryResult::retry_with()] or [RetryResult::retry_with_async()]
     fn from(retry_result: RetryResult<ReportedInput, OriginalInput, Output, ErrorType>) -> Self {
         match retry_result {
