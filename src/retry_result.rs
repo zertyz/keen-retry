@@ -64,6 +64,7 @@ RetryResult<ReportedInput,
             ErrorType> {
 
     /// If this operation is [Self::Ok], spots its data by calling `f(&reported_input, &output)`
+    #[inline(always)]
     pub fn inspect_ok<IgnoredReturn,
                                   F: FnOnce(&ReportedInput, &Output) -> IgnoredReturn>
                                  (self, f: F) -> Self {
@@ -74,6 +75,7 @@ RetryResult<ReportedInput,
     }
 
     /// If this operation is [Self::Transient], spots its data by calling `f(&original_input, &error)`
+    #[inline(always)]
     pub fn inspect_transient<IgnoredReturn,
                              F: FnOnce(&OriginalInput, &ErrorType) -> IgnoredReturn>
                             (self, f: F) -> Self {
@@ -85,6 +87,7 @@ RetryResult<ReportedInput,
 
     /// Spots on the data of an operation that failed fatably (in which case, no retrying will be attempted).
     ///   - `f(&original_input, &error_type)`
+    #[inline(always)]
     pub fn inspect_fatal<IgnoredReturn,
                          F: FnOnce(&OriginalInput, &ErrorType) -> IgnoredReturn>
                         (self, f: F) -> Self {
@@ -101,6 +104,7 @@ RetryResult<ReportedInput,
     /// A nice usage would be to upgrade the initial payload to a tuple, keeping track of how much time will be spent retrying:
     /// ```nocompile
     ///     .map_input(|payload| (payload, SystemTime::now()))
+    #[inline(always)]
     pub fn map_input<NewOriginalInput,
                      F: FnOnce(OriginalInput) -> NewOriginalInput>
                     (self, f: F) -> RetryResult<ReportedInput, NewOriginalInput, Output, ErrorType> {
@@ -114,6 +118,7 @@ RetryResult<ReportedInput,
     /// Changes the input & output data associated with an operation that was successful.
     ///   - `f(reported_input, output) -> (new_reported_input, new_output)`.\
     /// See [Self::map_input()] if you'd rather change original input instead
+    #[inline(always)]
     pub fn map_ok<NewReportedInput,
                   NewOutput,
                   F: FnOnce(ReportedInput, Output) -> (NewReportedInput, NewOutput)>
@@ -131,6 +136,7 @@ RetryResult<ReportedInput,
     /// Changes the (value of the) error that indicates this operation may be retried.\
     /// See [Self::map_errors()] if you'd also like to change the type;\
     /// See [Self::map_inputs_and_errors()] if you'd like to remap/swap all possible pairs of input/error
+    #[inline(always)]
     pub fn map_transient_error<F: FnOnce(ErrorType) -> ErrorType>
                               (self, f: F)
                               -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType> {
@@ -143,6 +149,7 @@ RetryResult<ReportedInput,
 
     /// Changes the (value of the) error that indicates this operation may not be retried.\
     /// See [Self::map_errors()] if you'd also like to change the type.
+    #[inline(always)]
     pub fn map_fatal_error<F: FnOnce(ErrorType) -> ErrorType>
                           (self, f: F)
                           -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType> {
@@ -161,6 +168,7 @@ RetryResult<ReportedInput,
     /// moving the consumed input back to the error, so the caller may not lose the payload.
     /// 
     /// See also [ResolvedResult::map_inputs_and_errors()] for similar semantics after exhausting retries.
+    #[inline(always)]
     pub fn map_input_and_errors<NewOriginalInput,
                                  NewErrorType,
                                  FatalMapFn:     FnOnce(OriginalInput, ErrorType) -> (NewOriginalInput, NewErrorType),
@@ -186,6 +194,7 @@ RetryResult<ReportedInput,
 
     /// Upgrades this [RetryResult] into a [KeenRetryExecutor], which will, on its turn, be upgraded to [crate::ResolvedResult],
     /// containing the final results after executing the retrying process
+    #[inline(always)]
     pub fn retry_with<RetryFn: FnMut(OriginalInput) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>
                      (self,
                       retry_operation: RetryFn)
@@ -200,6 +209,7 @@ RetryResult<ReportedInput,
 
     /// Upgrades this [RetryResult] into a [KeenRetryAsyncExecutor], which will, on its turn, be upgraded to [crate::ResolvedResult],
     /// containing the final results after executing the retrying process
+    #[inline(always)]
     pub fn retry_with_async<AsyncRetryFn: FnMut(OriginalInput) -> OutputFuture,
                             OutputFuture: Future<Output=RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>>
                            (self,
@@ -215,28 +225,33 @@ RetryResult<ReportedInput,
 
     /// Returns `true` if the operation succeeded.\
     /// Also mimmics the `Result<>` API for users that don't opt-in for the `keen-retry` API.
+    #[inline(always)]
     pub fn is_ok(&self) -> bool {
         matches!(self, RetryResult::Ok {..})
     }
 
     /// Mimmics the `Result<>` API for users that don't opt-in for the `keen-retry` API:
     /// simply returns `true` if the error is [Self::Fatal] or [Self::Transient].
+    #[inline(always)]
     pub fn is_err(&self) -> bool {
         self.is_transient() || self.is_fatal()
     }
 
     /// Returns `true` if the operation failed fatably
+    #[inline(always)]
     pub fn is_fatal(&self) -> bool {
         matches!(self, RetryResult::Fatal {..})
     }
 
     /// Returns `true` if the operation resulted in a transient error,
     /// electing the same input(s) for a retry.\
+    #[inline(always)]
     pub fn is_transient(&self) -> bool {
         matches!(self, RetryResult::Transient {..})
     }
 
     /// Panics if `self` isn't [RetryResult::Ok]
+    #[inline(always)]
     pub fn expect_ok(&self, panic_msg: &str) {
         if !self.is_ok() {
             panic!("{panic_msg}")
@@ -244,6 +259,7 @@ RetryResult<ReportedInput,
     }
 
     /// Panics if `self` isn't [RetryResult::Transient]
+    #[inline(always)]
     pub fn expect_transient(&self, panic_msg: &str) {
         if !self.is_transient() {
             panic!("{panic_msg}")
@@ -251,6 +267,7 @@ RetryResult<ReportedInput,
     }
 
     /// Panics if `self` isn't [RetryResult::Fatal]
+    #[inline(always)]
     pub fn expect_fatal(&self, panic_msg: &str) {
         if !self.is_fatal() {
             panic!("{panic_msg}")
@@ -259,6 +276,7 @@ RetryResult<ReportedInput,
 
     /// Syntatic sugar for [Result<Output, ErrorType>::from()].\
     /// See also [Self::into()]
+    #[inline(always)]
     pub fn into_result(self) -> Result::<Output, ErrorType> {
         Result::<Output, ErrorType>::from(self)
     }
@@ -277,6 +295,7 @@ Result<Output, ErrorType> {
 
     /// Opts out of any retrying attempts and downgrades this, potentially retryable result, into a standard Rust `Result<>`.\
     /// To opt-in for the retrying process, see [RetryResult::retry_with()] or [RetryResult::retry_with_async()]
+    #[inline(always)]
     fn from(retry_result: RetryResult<ReportedInput, OriginalInput, Output, ErrorType>) -> Self {
         match retry_result {
             RetryResult::Ok { reported_input: _, output }    => Ok(output),

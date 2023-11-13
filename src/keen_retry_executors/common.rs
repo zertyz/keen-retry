@@ -3,6 +3,7 @@
 use std::{ops::RangeInclusive, time::Duration};
 
 
+/// Configuration options for the "Exponential with Random Jitter" backoff strategy
 pub enum ExponentialJitter<ErrorType> {
 
     /// Configs for an exponential backoff with random jitter that retries from the start to the
@@ -34,6 +35,8 @@ pub enum ExponentialJitter<ErrorType> {
     },
 }
 impl<ErrorType> Default for ExponentialJitter<ErrorType> {
+
+    #[inline(always)]
     fn default() -> Self {
         Self::FromBackoffRange {
             backoff_range_millis: 100..=10000,
@@ -51,6 +54,8 @@ impl<ErrorType> Default for ExponentialJitter<ErrorType> {
 /// geometric progression will be 0 and the rest of the progression will continue as if it had started with 1
 /// -- allowing for zero backoff on the first attempt, which might make sense in highly distributed systems with really low fault rates.\
 /// See also [exponential_jitter_from_expoent()]
+#[inline(always)]
+
 pub fn exponential_jitter_from_range(backoff_range_millis: RangeInclusive<u32>, re_attempts: u8, jitter_ratio: f32) -> impl Iterator<Item=Duration> {
     let backoff_range_millis = *backoff_range_millis.start() as f64 ..= *backoff_range_millis.end() as f64;
     let expoent = if *backoff_range_millis.start() == 0.0 {
@@ -68,6 +73,8 @@ pub fn exponential_jitter_from_range(backoff_range_millis: RangeInclusive<u32>, 
 /// geometric progression will be 0 and the rest of the progression will continue as if it had started with 1
 /// -- allowing for zero backoff on the first attempt, which might make sense in highly distributed systems with really low fault rates.
 /// See also [exponential_jitter_from_range()]
+#[inline(always)]
+
 pub fn exponential_jitter_from_expoent(initial_backoff_millis: u32, expoent: f64, re_attempts: u8, jitter_ratio: f32) -> impl Iterator<Item=Duration> {
     use rand::Rng;
     let mut rng = rand::thread_rng();

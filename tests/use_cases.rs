@@ -179,21 +179,24 @@ struct MyPayload {
 }
 
 
-// Pattern: implement a local wrapper to bring keen retry Results back to standard ones,
+// Pattern: implement a local wrapper to bring keen retry `ResolvedResult` back to standard `Result<>`,
 //          defining the retry logic there.
 
-/// Overrides the original method
+/// Shows off a simple retry logic with a simple instrumentation, ensuring any retry
+/// attempts wouldn't go on silently.\
+/// This is the minimum recommended instrumentation, which would be lost after downgrading
+/// the [keen_retry::ResolvedResult] to a standard `Result<>`.
 pub async fn keen_connect_to_server(socket: &Arc<Socket>) -> Result<(), ConnectionErrors> {
     let cloned_socket = Arc::clone(socket);
     socket.connect_to_server_retry().await
         .retry_with_async(|_| cloned_socket.connect_to_server_retry())
         .with_exponential_jitter(keen_retry::ExponentialJitter::FromBackoffRange { backoff_range_millis: 10..=130, re_attempts: 10, jitter_ratio: 0.1 })
         .await
-        .inspect_recovered(|_, _, retry_errors_list| println!("## `connect_to_server()`: successfully connected after retrying {} times (failed attempts: [{}])", retry_errors_list.len(), keen_retry::loggable_retry_errors(retry_errors_list)))
+        .inspect_recovered(|_, _, retry_errors_list| println!("## `keen_connect_to_server()`: successfully connected after retrying {} times (failed attempts: [{}])",
+                                                                                  retry_errors_list.len(), keen_retry::loggable_retry_errors(retry_errors_list)))
         .into_result()
 }
 
-/// Overrides the original method
 /// Shows off a rather "complex" retrying & instrumentation logic, but still zero-cost when not retrying.\
 /// This method has a slightly different return type than the original:
 ///   * if successful, it returns a serialized version of the sent payload. It is for demonstration purposes
@@ -239,7 +242,7 @@ pub async fn keen_send<T: Debug + PartialEq>
         .inspect_recovered(|(loggable_payload, duration), _output, retry_errors_list|
             println!("## `keen_send({loggable_payload})`: succeeded after retrying {} time(s) in {:?}. Transient failures were: [{}]",
                      retry_errors_list.len(), duration, keen_retry::loggable_retry_errors(retry_errors_list)))
-        // remaps the input types back to their originals, simulating we are interested in only part of it (that other part was usefull only for instrumentation)
+        // remaps the input types back to their originals, simulating we are interested in only part of it (that other part was useful only for instrumentation)
         .map_unrecoverable_input(|(_loggable_payload, payload, _retry_start)| payload)
         .map_reported_input(|(loggable_payload, _duration)| loggable_payload)
         // demonstrates how to map the reported input (`loggable_payload` in our case) into the output, so it will be available at final `Ok(loggable_payload)` result

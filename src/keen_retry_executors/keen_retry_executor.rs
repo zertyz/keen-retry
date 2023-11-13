@@ -53,6 +53,8 @@ KeenRetryExecutor<ReportedInput,
                   RetryFn> {
 
 
+    /// Instantiates a new instance of a retry process -- which may or not be triggered, depending on the first result
+    #[inline(always)]
     pub fn new(original_input: OriginalInput, retry_operation: RetryFn, first_attempt_retryable_error: ErrorType) -> Self {
         Self::ToRetry {
             input: original_input,
@@ -61,10 +63,16 @@ KeenRetryExecutor<ReportedInput,
         }
     }
 
+    /// Sugar function to instantiate an already resolved retry process where [KeenRetryExecutor::ResolvedOk] is the final outcome
+    /// -- no retrying will be performed, since it succeeded at the first attempt
+    #[inline(always)]
     pub fn from_ok_result(reported_input: ReportedInput, output: Output) -> Self {
         Self::ResolvedOk { reported_input, output }
     }
 
+    /// Sugar function to instantiate an already resolved retry process where [KeenRetryExecutor::ResolvedErr] is the final outcome
+    /// -- no retrying will be performed, since a it is a fatal failure
+    #[inline(always)]
     pub fn from_err_result(original_input: OriginalInput, error: ErrorType) -> Self {
         Self::ResolvedErr { original_input, error }
     }
@@ -77,6 +85,7 @@ KeenRetryExecutor<ReportedInput,
     /// See also:
     ///   * [Self::spinning_forever()] or [Self::spinning_until_timeout()] for retrying local operations;
     ///   * [Self::with_delays()] for custom backoffs.
+    #[inline(always)]
     pub fn with_exponential_jitter(self,
                                    config: ExponentialJitter<ErrorType>)
                                   -> ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType> {
@@ -108,12 +117,14 @@ KeenRetryExecutor<ReportedInput,
     ///     .with_delays((100..=1000).step_by(100).map(|millis| Duration::from_millis(millis)))
     ///     // for a geometric progression with a 1.289 ratio in 13 steps: sleeps from 1 to ~350ms
     ///     .with_delays((1..=13).map(|millis| Duration::from_millis(1.289f64.powi(millis)) as u64))
+    #[inline(always)]
     pub fn with_delays(self, delays: impl Iterator<Item=Duration>) -> ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType> {
         self.with_delays_and_timeout(delays, Duration::ZERO, None)
     }
 
     /// Similar to [Self::with_delays()], but enforces a timeout for the whole retrying process -- useful for nested retry operations, which may quickly scale up.\
     /// If `timeout_error` is `None`, no timeout is enforced and this method behaves exactly like [Self::with_delays()]
+    #[inline(always)]
     pub fn with_delays_and_timeout(self,
                                    mut delays:        impl Iterator<Item=Duration>,
                                    timeout:           Duration,
@@ -151,6 +162,7 @@ KeenRetryExecutor<ReportedInput,
     /// executing the `retry_operation` until it either succeeds or fatably fails, relaxing the CPU on each attempt, without context-switching.\
     /// Use with caution, as this method may dead-lock the thread, at 100% CPU usage, as there is no limit for the number of retries.\
     /// See also [Self::spinning_until_timeout()] and [Self::with_delays()]
+    #[inline(always)]
     pub fn spinning_forever(self) -> ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType> {
         self.retry_loop(
             |input, retry_errors| {
@@ -171,6 +183,7 @@ KeenRetryExecutor<ReportedInput,
     /// Upon each new attempt, some time will be spent in the CPU Relaxed state & a context switch is likely to happen, due to fetching the time.
     /// -- since the CPU usage will still be 100%, using this method is recommended only for very short durations (<~100ms).\
     /// See also [Self::spinning_forever()] and [Self::with_delays()]
+    #[inline(always)]
     pub fn spinning_until_timeout(self,
                                   timeout:       Duration,
                                   timeout_error: ErrorType)
@@ -203,6 +216,7 @@ KeenRetryExecutor<ReportedInput,
     ///   - `on_non_fatal_failure(&input, error, &mut retry_errors_list)`
     ///     Called when the current retry attempt failed. Used to, optionally, push the error in the `retry_errors_list`.
     /// See the sources of [Self::with_delays()] for a good example of how to use this low level function.
+    #[inline(always)]
     pub fn retry_loop(self,
                       mut on_pre_attempt:       impl FnMut(OriginalInput,  Vec<ErrorType>) -> Result<(OriginalInput, Vec<ErrorType>), ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType>>,
                       mut on_non_fatal_failure: impl FnMut(&OriginalInput, ErrorType, &mut Vec<ErrorType>))

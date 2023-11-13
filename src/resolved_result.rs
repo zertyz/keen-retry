@@ -69,6 +69,7 @@ ResolvedResult<ReportedInput,
     ///   * `reported_input` represents the input of the operation -- since the operation may
     ///     consume the original input, `reported_input` may be just a light-weight representation
     ///     of it, possibly for instrumentation.
+    #[inline(always)]
     pub fn from_ok_result(reported_input: ReportedInput, output: Output) -> Self {
         ResolvedResult::Ok { reported_input, output }
     }
@@ -76,21 +77,25 @@ ResolvedResult<ReportedInput,
     /// Builds an instance with the results of an operation that failed fatably at the first attempt.
     ///   * `error` specifies the fatal, unrecoverable failure.
     ///   * `original_input` is the data that the operation would consume, if successful.
+    #[inline(always)]
     pub fn from_err_result(original_input: OriginalInput, error: ErrorType) -> Self {
         ResolvedResult::Fatal { input: original_input, error }
     }
 
     /// Tells whether this result represents one of the successful variants
+    #[inline(always)]
     pub fn is_success(&self) -> bool {
         matches!(self, Self::Ok { .. } | Self::Recovered { .. })
     }
 
     /// Tells whether this result represents one of the failure variants
+    #[inline(always)]
     pub fn is_failure(&self) -> bool {
         !self.is_success()
     }
 
     /// If this operation is [Self::Ok], spots its data by calling `f(&reported_input, &output)`
+    #[inline(always)]
     pub fn inspect_ok<IgnoredReturn,
                       F: FnOnce(&ReportedInput, &Output) -> IgnoredReturn>
                      (self, f: F) -> Self {
@@ -101,6 +106,7 @@ ResolvedResult<ReportedInput,
     }
 
     /// If this operation is [Self::Fatal], spots its data by calling `f(&original_input, &error)`
+    #[inline(always)]
     pub fn inspect_fatal<IgnoredReturn,
                          F: FnOnce(&OriginalInput, &ErrorType) -> IgnoredReturn>
                         (self, f: F) -> Self {
@@ -114,6 +120,7 @@ ResolvedResult<ReportedInput,
     ///   - `f(&reported_input, &output, &retry_errors_list)`
     ///   - if the error type implements `Debug`, you can use `let loggable_retry_errors = keen_retry::loggable_retry_errors(&retry_errors_list)`
     ///     inside `f()` to serialize the `retry_errors_list` into a loggable String
+    #[inline(always)]
     pub fn inspect_recovered<IgnoredReturn,
                              F: FnOnce(&ReportedInput, &Output, &Vec<ErrorType>) -> IgnoredReturn>
                             (self, f: F) -> Self {
@@ -127,6 +134,7 @@ ResolvedResult<ReportedInput,
     ///   - `f(&original_input, &retry_errors_list, &fatal_error)`
     ///   - if the error type implements `Debug`, you can do `let loggable_retry_errors = keen_retry::loggable_retry_errors(&retry_errors_list)`
     ///     inside `f()` to serialize the `retry_errors_list` into a loggable String
+    #[inline(always)]
     pub fn inspect_given_up<IgnoredReturn,
                             F: FnOnce(&OriginalInput, &Vec<ErrorType>, /*fatal_error: */&ErrorType) -> IgnoredReturn>
                            (self, f: F) -> Self {
@@ -140,6 +148,7 @@ ResolvedResult<ReportedInput,
     ///   - `f(&original_input, &retry_errors_list, &fatal_error)`
     ///   - if the error type implements `Debug`, you can do `let loggable_retry_errors = keen_retry::loggable_retry_errors(&retry_errors_list)`
     ///     inside `f()` to serialize the `retry_errors_list` into a loggable String
+    #[inline(always)]
     pub fn inspect_unrecoverable<IgnoredReturn,
                                  F: FnOnce(&OriginalInput, &Vec<ErrorType>, /*fatal_error: */&ErrorType) -> IgnoredReturn>
                                 (self, f: F) -> Self {
@@ -159,6 +168,7 @@ ResolvedResult<ReportedInput,
     /// ```nocompile
     ///     // downgrades the laden `reported_input` that was useful during logging & retrying
     ///     .map_reported_input(|(loggable_payload, duration)| loggable_payload)
+    #[inline(always)]
     pub fn map_reported_input<NewReportedInput,
                               F: FnOnce(ReportedInput) -> NewReportedInput>
                              (self, f: F) -> ResolvedResult<NewReportedInput, OriginalInput, Output, ErrorType> {
@@ -178,6 +188,7 @@ ResolvedResult<ReportedInput,
     /// ```nocompile
     ///     // downgrades the laden payload that was useful when logging the retry attempts & outcomes
     ///     .map_unrecoverable_input(|(original_payload, duration)| original_payload)
+    #[inline(always)]
     pub fn map_unrecoverable_input<NewOriginalInput,
                                    F: FnOnce(OriginalInput) -> NewOriginalInput>
                                   (self, f: F) -> ResolvedResult<ReportedInput, NewOriginalInput, Output, ErrorType> {
@@ -197,6 +208,7 @@ ResolvedResult<ReportedInput,
     /// a `Result::Ok` (instead of the usual output):
     /// ```nocompile
     ///     .map_reported_input_and_output(|reported_input, output| (output, reported_input) )
+    #[inline(always)]
     pub fn map_reported_input_and_output<NewReportedInput,
                                          NewOutput,
                                          F: FnOnce(ReportedInput, Output) -> (NewReportedInput, NewOutput)>
@@ -225,6 +237,7 @@ ResolvedResult<ReportedInput,
     /// failed payload when converted to `Result::Err`.
     /// 
     /// See also [RetryResult::map_inputs_and_errors()] for similar semantics when you wish to skip retrying.
+    #[inline(always)]
     pub fn map_input_and_errors<NewOriginalInput,
                                  NewErrorType,
                                  FatalMapFn:       FnOnce(OriginalInput, ErrorType) -> (NewOriginalInput, NewErrorType),
@@ -256,6 +269,7 @@ ResolvedResult<ReportedInput,
 
     /// Syntatic sugar for [Result<Output, ErrorType>::from()].\
     /// See also [Self::into()]
+    #[inline(always)]
     pub fn into_result(self) -> Result::<Output, ErrorType> {
         Result::<Output, ErrorType>::from(self)
     }
@@ -273,6 +287,7 @@ From<ResolvedResult<ReportedInput,
 Result<Output, ErrorType> {
 
     /// Lossy operation that will downgrade this already resolved operation (after some possible retries) into a `Result<>`
+    #[inline(always)]
     fn from(resolved_result: ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType>) -> Result<Output, ErrorType> {
         match resolved_result {
             ResolvedResult::Ok { reported_input: _, output }                            => Ok(output),
