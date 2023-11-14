@@ -267,6 +267,63 @@ ResolvedResult<ReportedInput,
         }
     }
 
+    /// Panics if this [ResolvedResult] isn't [ResolvedResult::Ok]
+    #[inline(always)]
+    pub fn expect_ok(self, panic_msg: &str) -> Self {
+        if !matches!(self, Self::Ok {..} ) {
+            panic!("{panic_msg}: ResolvedResult::Ok was expected. Found: {}", self.variant_name())
+        }
+        self
+    }
+
+    /// Panics if this [ResolvedResult] isn't [ResolvedResult::Fatal]
+    #[inline(always)]
+    pub fn expect_fatal(self, panic_msg: &str) -> Self {
+        if !matches!(self, Self::Fatal {..} ) {
+            panic!("{panic_msg}: ResolvedResult::Fatal was expected. Found: {}", self.variant_name())
+        }
+        self
+    }
+
+    /// Panics if this [ResolvedResult] isn't [ResolvedResult::Recovered]
+    #[inline(always)]
+    pub fn expect_recovered(self, panic_msg: &str) -> Self {
+        if !matches!(self, Self::Recovered {..} ) {
+            panic!("{panic_msg}: ResolvedResult::Recovered was expected. Found: {}", self.variant_name())
+        }
+        self
+    }
+
+    /// Panics if this [ResolvedResult] isn't [ResolvedResult::GivenUp]
+    #[inline(always)]
+    pub fn expect_given_up(self, panic_msg: &str) -> Self {
+        if !matches!(self, Self::GivenUp {..} ) {
+            panic!("{panic_msg}: RetryResult::GivenUp was expected. Found: {}", self.variant_name())
+        }
+        self
+    }
+
+    /// Panics if this [ResolvedResult] isn't [ResolvedResult::Unrecoverable]
+    #[inline(always)]
+    pub fn expect_unrecoverable(self, panic_msg: &str) -> Self {
+        if !matches!(self, Self::Unrecoverable {..} ) {
+            panic!("{panic_msg}: RetryResult::Unrecoverable was expected. Found: {}", self.variant_name())
+        }
+        self
+    }
+
+    /// Simply returns the variant name `self` represents
+    #[inline(always)]
+    pub fn variant_name(&self) -> &str {
+        match self {
+            ResolvedResult::Ok { .. }            => "Ok",
+            ResolvedResult::Fatal { .. }         => "Fatal",
+            ResolvedResult::Recovered { .. }     => "Recovered",
+            ResolvedResult::GivenUp { .. }       => "GivenUp",
+            ResolvedResult::Unrecoverable { .. } => "Unrecoverable",
+        }
+    }
+
     /// Syntatic sugar for [Result<Output, ErrorType>::from()].\
     /// See also [Self::into()]
     #[inline(always)]

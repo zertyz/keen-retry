@@ -284,29 +284,43 @@ RetryResult<ReportedInput,
         matches!(self, RetryResult::Transient {..})
     }
 
-    /// Panics if `self` isn't [RetryResult::Ok]
+    /// Panics if this [RetryResult] isn't [RetryResult::Ok]
     #[inline(always)]
-    pub fn expect_ok(&self, panic_msg: &str) {
+    pub fn expect_ok(self, panic_msg: &str) -> Self {
         if !self.is_ok() {
-            panic!("{panic_msg}")
+            panic!("{panic_msg}: RetryResult::Ok was expected. Found: {}", self.variant_name())
         }
+        self
     }
 
-    /// Panics if `self` isn't [RetryResult::Transient]
+    /// Panics if this [RetryResult] isn't [RetryResult::Transient]
     #[inline(always)]
-    pub fn expect_transient(&self, panic_msg: &str) {
+    pub fn expect_transient(self, panic_msg: &str) -> Self {
         if !self.is_transient() {
-            panic!("{panic_msg}")
+            panic!("{panic_msg}: RetryResult::Transient was expected. Found: {}", self.variant_name())
+        }
+        self
+    }
+
+    /// Panics if this [RetryResult] isn't [RetryResult::Fatal]
+    #[inline(always)]
+    pub fn expect_fatal(self, panic_msg: &str) -> Self {
+        if !self.is_fatal() {
+            panic!("{panic_msg}: RetryResult::Fatal was expected. Found: {}", self.variant_name())
+        }
+        self
+    }
+
+    /// Simply returns the variant name `self` represents
+    #[inline(always)]
+    pub fn variant_name(&self) -> &str {
+        match self {
+            RetryResult::Ok { .. }        => "Ok",
+            RetryResult::Transient { .. } => "Transient",
+            RetryResult::Fatal { .. }     => "Fatal",
         }
     }
 
-    /// Panics if `self` isn't [RetryResult::Fatal]
-    #[inline(always)]
-    pub fn expect_fatal(&self, panic_msg: &str) {
-        if !self.is_fatal() {
-            panic!("{panic_msg}")
-        }
-    }
 
     /// Syntatic sugar for [Result<Output, ErrorType>::from()].\
     /// See also [Self::into()]

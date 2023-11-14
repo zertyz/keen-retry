@@ -14,13 +14,15 @@
 
 mod external_lib;
 use external_lib::*;
-use keen_retry::RetryResult;
+use keen_retry::{RetryConsumerResult, RetryProcedureResult, RetryResult};
 use std::{
     fmt::Debug,
     time::{Duration, SystemTime},
     sync::Arc,
 };
-use log::{error, warn};
+use std::future::Future;
+use std::pin::Pin;
+use log::{error, info, warn};
 
 
 type StdErrorType = Box<dyn std::error::Error + Send + Sync>;
@@ -178,6 +180,21 @@ async fn bail_out_of_retrying() -> Result<(), StdErrorType> {
     Ok(())
 }
 
+/// Demonstrates how to use the pattern presented in the free `keen-retry` book
+/// and implemented by [keen_broadcast()] --
+/// useful for operations containing sub-operations that may be completed in steps
+#[tokio::test]
+async fn partial_completion_with_continuation_closure() {
+    let expected_fatal_error = TransportErrors::QuotaExhausted { payload: None, root_cause: Box::from("You abused sending. Please don't try to send anything else today or you will be banned!") };
+    if let Err(mut fatal_errors_list) = keen_broadcast("Tell everyone!").await {
+        assert_eq!(fatal_errors_list.len(), 1, "There should be a single target for which we couldn't send due to a fatal error");
+        let observed_fatal_error = fatal_errors_list.pop();
+        assert_eq!(observed_fatal_error, Some(expected_fatal_error), "The failed target reported the wrong error")
+    } else {
+        panic!("`keen_broadcast()` reported it was able send the message to all targets, which isn't right")
+    }
+}
+
 
 /// Our test payload, used in `send()` operations
 #[derive(Debug, PartialEq)]
@@ -193,7 +210,7 @@ struct MyPayload {
 /// attempts wouldn't go on silently.\
 /// This is the minimum recommended instrumentation, which would be lost after downgrading
 /// the [keen_retry::ResolvedResult] to a standard `Result<>`.
-pub async fn keen_connect_to_server(socket: &Arc<Socket>) -> Result<(), ConnectionErrors> {
+async fn keen_connect_to_server(socket: &Arc<Socket>) -> Result<(), ConnectionErrors> {
     let cloned_socket = Arc::clone(socket);
     socket.connect_to_server().await
         .retry_with_async(|_| cloned_socket.connect_to_server())
@@ -212,12 +229,12 @@ pub async fn keen_connect_to_server(socket: &Arc<Socket>) -> Result<(), Connecti
 ///   * if unsuccessful, the original and unconsumed input is placed in the `Err` returned.
 /// As said, this method is bloated with `keen-retry` High Order Functions for demonstration purposes. For a more
 /// realistic usage, see [keen_receive()].
-pub async fn keen_send<T: Debug + PartialEq>
+async fn keen_send<T: Debug + PartialEq>
 
-                      (socket: &Arc<Socket>,
-                      payload: T)
+                  (socket: &Arc<Socket>,
+                  payload: T)
 
-                      -> Result<String, TransportErrors<T>> {
+                  -> Result<String, TransportErrors<T>> {
 
     let loggable_payload = format!("{:?}", payload);
     socket.send(payload).await
@@ -261,7 +278,7 @@ pub async fn keen_send<T: Debug + PartialEq>
 /// A more realistic demonstration of a possible real usage of the `keen-retry` API (in opposition to the fully fledged one in [keen_send()]).\
 /// Here, apart from the retrying logic & constraints, you will find detailed instrumentation with measurements for the time spent in
 /// backoffs + reattempts, if retrying kicks in.
-pub async fn keen_receive(socket: &Arc<Socket>) -> Result<&'static str, TransportErrors<&'static str>> {
+async fn keen_receive(socket: &Arc<Socket>) -> Result<&'static str, TransportErrors<&'static str>> {
     socket.receive()
         .inspect_fatal(|_, fatal_err|
             println!("## `keen_receive()`: fatal error (won't retry): {:?}", fatal_err))
@@ -292,4 +309,94 @@ pub async fn keen_receive(socket: &Arc<Socket>) -> Result<&'static str, Transpor
                      retry_errors_list.len(), duration, keen_retry::loggable_retry_errors(retry_errors_list)))
         .into_result()
 
+}
+
+/// Simulates an application specific retryable API demonstrating the
+/// "Partial Completion with Continuation Closure" pattern -- described
+/// in details in the free `keen-retry` book.\
+/// Here, the caller doesn't know the list of [Socket]s to broadcast to -- it is a knowledge
+/// restricted to this method. For such, a closure is used in the place of the "payload",
+/// allowing a different usage semantic: the "payload" won't be re-applied to the operation,
+/// but, instead, it contains a callable object that knows what payloads to reapply to which
+/// operations.\
+/// This pattern is very useful in advanced retrying logics.
+fn broadcast_continuation_closure<T: Clone + Debug + PartialEq + 'static>
+                       (payload: T)
+                       -> impl FnMut(()) -> Pin < Box < dyn Future < Output=RetryProcedureResult<Box<Vec<TransportErrors<T>>>> > > >  {
+
+    let mut list_of_targets_ptr = Box::into_raw(Box::new(vec![
+        // this one will fail transiently on the first connection
+        Socket::new(2, 999, 1, 999),
+        // this one will fail transiently on the first sending attempt
+        Socket::new(1, 999, 2, 999),
+        // this one will fail fatably, always, and won't ever be sent -- not even after all retries
+        Socket::new(1, 999, 999, 1),
+    ]));
+    let mut fatal_failures_ptr = Box::into_raw(Box::new(Vec::new()));
+
+    info!("Starting BROADCAST");
+
+    move |_| {
+        let payload = payload.clone();
+        // if you don't like pointers & the unsafe here, use Arc<Mutex<>> instead.
+        // This ownership problem is not present for closures that are not async
+        let list_of_targets = unsafe { &mut *list_of_targets_ptr };
+        let fatal_failures = unsafe { &mut *fatal_failures_ptr };
+
+        info!("Continueing with the BROADCAST of {} items -- {} fatably failed so far", list_of_targets.len(), fatal_failures.len());
+
+        Box::pin(async move {
+            let mut transient_failed_targets = Vec::new();
+            let mut transient_failures = Vec::new();
+            for target in list_of_targets.drain(..) {
+                // notice the send operation here has a different retrying logic -- we don't retry on individual sends
+                // (this is both to show case different retrying policies in different contexts and to optimize the operation,
+                //  as retrying is postponed as much as possible to the future, giving the target peer as much time to recover
+                //  as possible without delaying our broadcast to others)
+                let send_result = target.send(payload.clone()).await;
+                match send_result {
+                    RetryResult::Transient { input: _, error } => {
+                        transient_failed_targets.push(target);
+                        transient_failures.push(error)
+                    },
+                    RetryResult::Fatal { input, error } => {
+                        fatal_failures.push(error);
+                    },
+                    _ => (),
+                }
+            }
+            if transient_failed_targets.len() == 0 && fatal_failures.len() == 0 {
+                warn!("Ending BROADCAST with 100% success");
+                RetryResult::Ok { reported_input: (), output: () }
+            } else if transient_failed_targets.len() > 0 {
+                for target in transient_failed_targets.drain(..) {
+                    list_of_targets.push(target);
+                }
+                RetryResult::Transient { input: (), error: Box::from(transient_failures) }
+            } else {
+                warn!("Ending BROADCAST with {} fatal failure(s)", fatal_failures.len());
+                RetryResult::Fatal { input: (), error: unsafe { Box::from_raw(fatal_failures_ptr) } }
+            }
+        })
+    }
+}
+
+/// Demonstrates the "Partial Completion with Continuation Closure" pattern:\
+/// Here, the caller doesn't know the list of [Socket]s to broadcast to -- it is a knowledge
+/// restricted to this method. For such, a closure is used in the place of the "payload",
+/// allowing a different usage semantic: the "payload" won't be re-applied to the operation,
+/// but, instead, it contains a callable object that knows what payloads to reapply to which
+/// operations.\
+/// This pattern is very useful in advanced retrying logics.
+async fn keen_broadcast<T: Debug + PartialEq + Clone + 'static>
+                       (payload: T)
+                       -> Result<(), Box<Vec<TransportErrors<T>>>>  {
+
+    let mut continuation_closure = broadcast_continuation_closure(payload);
+    continuation_closure(()).await
+        .retry_with_async(continuation_closure)
+        .with_exponential_jitter(keen_retry::ExponentialJitter::FromBackoffRange { backoff_range_millis: 1000..=10000, re_attempts: 10, jitter_ratio: 0.2 })
+        .await
+        .inspect_unrecoverable(|_, remaining_errors, fatal_failures| warn!("Fatal failures found during the Broadcast: {}", keen_retry::loggable_retry_errors(fatal_failures)))
+        .into_result()
 }
