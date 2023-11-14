@@ -20,9 +20,16 @@ use std::{
     time::{Duration, SystemTime},
     sync::Arc,
 };
+use log::{error, warn};
 
 
 type StdErrorType = Box<dyn std::error::Error + Send + Sync>;
+
+
+#[ctor::ctor]
+fn suite_setup() {
+    simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap_or_else(|_| eprintln!("--> LOGGER WAS ALREADY STARTED"));
+}
 
 /// Uses our fake [Socket] connection, implementing a simple retrying mechanism (no instrumentations),
 /// to test all possible scenarios: 
@@ -103,7 +110,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     let case_name = "3.2) Recovered from failure on the 10th attempt (connection was initially NOT OK and will only succeed at the 5th attempt)";
     println!("\n{}:", case_name);
     let expected = Ok(format!("{:?}", MyPayload { message: case_name }));
-    let socket = Socket::new(5, 999, 10, 11);
+    let socket = Socket::new(5, 999, 5, 11);
     let result = keen_send(&socket, MyPayload { message: case_name }).await;
     assert_eq!(result, expected, "In '{}'", case_name);
     assert!(socket.is_connected(), "In '{}'", case_name);
@@ -116,7 +123,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     keen_connect_to_server(&socket, ).await?;
     let result = keen_send(&socket, to_send()).await;
     assert_eq!(result, expected, "In '{}'", case_name);
-    assert!(!socket.is_connected(), "In '{}'", case_name);
+    assert!(socket.is_connected(), "In '{}'", case_name);
 
     let case_name = "5.1) Failed fatably during the 10th retry attempt (in `send()`)";
     println!("\n{}:", case_name);
@@ -132,7 +139,7 @@ async fn zero_cost_abstractions() -> Result<(), StdErrorType> {
     println!("\n{}:", case_name);
     let to_send = || MyPayload { message: case_name };
     let expected = Err(TransportErrors::CannotReconnect { payload: Some(to_send()), root_cause: String::from("any root cause....").into() });
-    let socket = Socket::new(999, 999, 15, 16);
+    let socket = Socket::new(999, 10, 15, 16);
     let result = keen_send(&socket, to_send()).await;
     assert_eq!(result, expected, "In '{}'", case_name);
     assert!(!socket.is_connected(), "In '{}'", case_name);
@@ -147,13 +154,13 @@ async fn optable_api() -> Result<(), StdErrorType> {
     let case_name = "1) Ok operation";
     println!("\n{}:", case_name);
     let socket = Socket::new(1, 11, 1, 2);
-    socket.connect_to_server_retry().await.into_result()?;
-    assert!(socket.receive_retry().is_ok(), "Operation errored when it shouldn't at {case_name}");
+    socket.connect_to_server().await.into_result()?;
+    assert!(socket.receive().is_ok(), "Operation errored when it shouldn't at {case_name}");
 
     let case_name = "2) Err operation";
     println!("\n{}:", case_name);
     let socket = Socket::new(1, 11, 1, 2);
-    assert!(socket.receive_retry().is_err(), "Operation didn't errored as it should at {case_name}");
+    assert!(socket.receive().is_err(), "Operation didn't errored as it should at {case_name}");
 
     Ok(())
 }
@@ -163,7 +170,7 @@ async fn optable_api() -> Result<(), StdErrorType> {
 #[tokio::test]
 async fn bail_out_of_retrying() -> Result<(), StdErrorType> {
     let socket = Socket::new(1, 11, 1, 2);
-    let result = socket.send_retry("I want this back")
+    let result = socket.send_retryable("I want this back")
         .map_input_and_errors(|input, _retry_error| ((), input),
                               |input, _fatal_error| ((), input))
         .into_result();
@@ -188,12 +195,12 @@ struct MyPayload {
 /// the [keen_retry::ResolvedResult] to a standard `Result<>`.
 pub async fn keen_connect_to_server(socket: &Arc<Socket>) -> Result<(), ConnectionErrors> {
     let cloned_socket = Arc::clone(socket);
-    socket.connect_to_server_retry().await
-        .retry_with_async(|_| cloned_socket.connect_to_server_retry())
+    socket.connect_to_server().await
+        .retry_with_async(|_| cloned_socket.connect_to_server())
         .with_exponential_jitter(keen_retry::ExponentialJitter::FromBackoffRange { backoff_range_millis: 10..=130, re_attempts: 10, jitter_ratio: 0.1 })
         .await
-        .inspect_recovered(|_, _, retry_errors_list| println!("## `keen_connect_to_server()`: successfully connected after retrying {} times (failed attempts: [{}])",
-                                                                                  retry_errors_list.len(), keen_retry::loggable_retry_errors(retry_errors_list)))
+        .inspect_recovered(|_, _, retry_errors_list| warn!("`keen_connect_to_server()`: successfully connected after retrying {} times (failed attempts: [{}])",
+                                                                               retry_errors_list.len(), keen_retry::loggable_retry_errors(retry_errors_list)))
         .into_result()
 }
 
@@ -213,19 +220,13 @@ pub async fn keen_send<T: Debug + PartialEq>
                       -> Result<String, TransportErrors<T>> {
 
     let loggable_payload = format!("{:?}", payload);
-    socket.send_retry(payload)
+    socket.send(payload).await
         .inspect_fatal(|payload, fatal_err|
-            println!("## `keen_send({payload:?})`: fatal error (won't retry): {fatal_err:?}"))
+            error!("`keen_send({payload:?})`: fatal error (won't retry): {fatal_err:?}"))
         .map_ok(|_, _| ((loggable_payload.clone(), Duration::ZERO), () ) )
         .map_input(|payload| ( loggable_payload, payload, SystemTime::now() ) )
         .retry_with_async(|(loggable_payload, payload, retry_start)| async move {
-            if !socket.is_connected() {
-                if let Err(err) = keen_connect_to_server(socket).await {
-                    println!("## `keen_send({loggable_payload})`: Error attempting to reconnect (won't retry): {}", err);
-                    return RetryResult::Fatal { input: (loggable_payload, payload, retry_start), error: TransportErrors::CannotReconnect {payload: None, root_cause: err.into()} };
-                }
-            }
-            socket.send_retry(payload)
+            socket.send(payload).await
                 // notice the retry operation must map to the same types as the original operation:
                 .map_ok(|_, _| ((loggable_payload.clone(), retry_start.elapsed().unwrap_or_default()), () ))
                 .map_input(|payload| (loggable_payload, payload, retry_start) )
@@ -233,15 +234,15 @@ pub async fn keen_send<T: Debug + PartialEq>
         .with_exponential_jitter(keen_retry::ExponentialJitter::FromBackoffRange { backoff_range_millis: 0..=100, re_attempts: 10, jitter_ratio: 0.1 })
         .await
         .inspect_given_up(|(_loggable_payload, payload, retry_start), retry_errors_list, fatal_error|
-            println!("## `keen_send({payload:?})` FAILED after exhausting all {} retrying attempts in {:?} with error {fatal_error:?}. Previous transient failures were: [{}]",
-                     retry_errors_list.len(), retry_start.elapsed().unwrap_or_default(), keen_retry::loggable_retry_errors(retry_errors_list)))
+            error!("`keen_send({payload:?})` FAILED after exhausting all {} retrying attempts in {:?} with error {fatal_error:?}. Previous transient failures were: [{}]",
+                   retry_errors_list.len(), retry_start.elapsed().unwrap_or_default(), keen_retry::loggable_retry_errors(retry_errors_list)))
         .inspect_unrecoverable(|(_loggable_payload, payload, retry_start), retry_errors_list, fatal_error| {
-            println!("## `keen_send({payload:?})`: fatal error after trying {} time(s) in {:?}: {fatal_error:?} -- prior to that fatal failure, these retry attempts also failed: [{}]",
-                     retry_errors_list.len()+1, retry_start.elapsed().unwrap_or_default(), keen_retry::loggable_retry_errors(retry_errors_list));
+            error!("`keen_send({payload:?})`: fatal error after trying {} time(s) in {:?}: {fatal_error:?} -- prior to that fatal failure, these retry attempts also failed: [{}]",
+                   retry_errors_list.len()+1, retry_start.elapsed().unwrap_or_default(), keen_retry::loggable_retry_errors(retry_errors_list));
         })
         .inspect_recovered(|(loggable_payload, duration), _output, retry_errors_list|
-            println!("## `keen_send({loggable_payload})`: succeeded after retrying {} time(s) in {:?}. Transient failures were: [{}]",
-                     retry_errors_list.len(), duration, keen_retry::loggable_retry_errors(retry_errors_list)))
+            warn!("`keen_send({loggable_payload})`: succeeded after retrying {} time(s) in {:?}. Transient failures were: [{}]",
+                  retry_errors_list.len(), duration, keen_retry::loggable_retry_errors(retry_errors_list)))
         // remaps the input types back to their originals, simulating we are interested in only part of it (that other part was useful only for instrumentation)
         .map_unrecoverable_input(|(_loggable_payload, payload, _retry_start)| payload)
         .map_reported_input(|(loggable_payload, _duration)| loggable_payload)
@@ -261,7 +262,7 @@ pub async fn keen_send<T: Debug + PartialEq>
 /// Here, apart from the retrying logic & constraints, you will find detailed instrumentation with measurements for the time spent in
 /// backoffs + reattempts, if retrying kicks in.
 pub async fn keen_receive(socket: &Arc<Socket>) -> Result<&'static str, TransportErrors<&'static str>> {
-    socket.receive_retry()
+    socket.receive()
         .inspect_fatal(|_, fatal_err|
             println!("## `keen_receive()`: fatal error (won't retry): {:?}", fatal_err))
         .map_ok(|_, received| ( Duration::ZERO, received ))
@@ -273,7 +274,7 @@ pub async fn keen_receive(socket: &Arc<Socket>) -> Result<&'static str, Transpor
                     return RetryResult::Fatal { input: retry_start, error: TransportErrors::CannotReconnect {payload: None, root_cause: err.into()} };
                 }
             }
-            socket.receive_retry()
+            socket.receive()
                 .map_ok(|_, received| ( retry_start.elapsed().unwrap_or_default(), received ) )
                 .map_input(|_| retry_start )
         })

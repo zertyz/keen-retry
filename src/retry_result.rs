@@ -192,6 +192,40 @@ RetryResult<ReportedInput,
         }
     }
 
+    /// TODO: add the docs
+    #[inline(always)]
+    pub fn or_else_with<F: FnOnce(OriginalInput, ErrorType) -> Self>
+                       (self, f: F)
+                       -> Self {
+        match self {
+            RetryResult::Transient { input, error }   => f(input, error),
+            RetryResult::Ok { reported_input, output } => RetryResult::Ok    { reported_input, output },
+            RetryResult::Fatal { input, error }       => RetryResult::Fatal { input, error },
+        }
+    }
+
+    /// TODO: add the docs
+    #[inline(always)]
+    pub async fn or_else_with_async<F:            FnOnce(OriginalInput, ErrorType) -> OutputFuture,
+                                    OutputFuture: Future<Output=Self>>
+                                   (self, f: F)
+                                   -> Self {
+        match self {
+            RetryResult::Transient { input, error }   => f(input, error).await,
+            RetryResult::Ok { reported_input, output } => RetryResult::Ok    { reported_input, output },
+            RetryResult::Fatal { input, error }       => RetryResult::Fatal { input, error },
+        }
+    }
+
+    /// TODO: add the docs
+    #[inline(always)]
+    pub fn or_else_with_supplier<RetryFnOutput,
+                                 LibraryRetryFn: FnMut() -> RetryFnOutput>
+                                ()
+                                -> RetryResult<ReportedInput, LibraryRetryFn, Output, ErrorType> {
+        todo!()
+    }
+
     /// Upgrades this [RetryResult] into a [KeenRetryExecutor], which will, on its turn, be upgraded to [crate::ResolvedResult],
     /// containing the final results after executing the retrying process
     #[inline(always)]

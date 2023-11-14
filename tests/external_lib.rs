@@ -11,6 +11,7 @@
 //!   2) The original library methods -- these are totally agnostic of the `keen-retry` crate;
 //!   3) The `keen-retry` wrappers -- these add variations over the original methods that enrich the
 //!      standard Rust `Result<>` type into our `RetryResult<>`, able to distinguish transient errors.
+//!   4) The Composable retry logic policies in the library level, show casing the separation of concerns
 
 use std::{
     fmt::Debug,
@@ -19,9 +20,13 @@ use std::{
         Arc,
     },
 };
+use std::future::Future;
+use std::pin::Pin;
+use log::{error, info, warn};
 
-use keen_retry::{RetryConsumerResult, RetryProcedureResult, RetryProducerResult};
+use keen_retry::{RetryConsumerResult, RetryProcedureResult, RetryProducerResult, RetryResult};
 use thiserror::Error;
+use keen_retry::keen_retry_async_executor::KeenRetryAsyncExecutor;
 
 
 // 1) CUSTOM ERROR DEFINITIONS
@@ -131,7 +136,7 @@ impl<Payload: Debug + PartialEq> PartialEq for TransportErrors<Payload> {
 /// Our fictitius library is a simple network client with `connect()`, `send()`, and `receive()` operations.\
 /// We simulate errors for `connect()` and `send()`, through some latch counters:
 ///   a) No errors happen until `*_success_latch_countdown` reaches 0 -- which is decremented on each call;
-///   b) When `*_success_latch_countdown` reaches 0 and while `*_fatal_failure_latch_countdown` is > 0 (which
+///   b) While `*_success_latch_countdown` doesn't reach 0 and while `*_fatal_failure_latch_countdown` is > 0 (which
 ///      is also decremented on each call), a Transient error will be issued
 ///   c) Having `*_fatal_failure_latch_countdown` reached 0, only fatal errors will be issued.
 pub struct Socket {
@@ -168,7 +173,7 @@ impl Socket {
     // Your original methods, agnostic of the `keen-retry` crate
 
     /// Simulates a real connection, failing according to the configuration
-    pub async fn connect_to_server(&self) -> Result<(), ConnectionErrors> {
+    pub(crate) async fn connect_to_server_raw(&self) -> Result<(), ConnectionErrors> {
         self.connection_attempts.fetch_add(1, Relaxed);
         if self.connection_success_latch_countdown.fetch_sub(1, Relaxed) <= 1 {
             self.connection_fatal_failure_latch_countdown.fetch_sub(1, Relaxed);
@@ -177,9 +182,6 @@ impl Socket {
         } else if self.connection_fatal_failure_latch_countdown.fetch_sub(1, Relaxed) <= 1 {
             self.is_connected.store(false, Relaxed);
             Err(ConnectionErrors::WrongCredentials)
-        } else if self.connection_success_latch_countdown.load(Relaxed) <= 0 {
-            self.is_connected.store(true, Relaxed);
-            Ok(())
         } else {
             self.is_connected.store(false, Relaxed);
             Err(ConnectionErrors::ServerTooBusy)
@@ -192,10 +194,10 @@ impl Socket {
     }
 
     /// Simulates a real send, failing according to the configuration
-    pub fn send<T: Debug + PartialEq>
-               (&self,
-                payload: T)
-               -> Result<(), TransportErrors<T>> {
+    pub(crate) fn send_raw<T: Debug + PartialEq>
+                          (&self,
+                           payload: T)
+                          -> Result<(), TransportErrors<T>> {
 
         if !self.is_connected.load(Relaxed) {
             Err(TransportErrors::NotConnected { payload: Some(payload) })
@@ -216,7 +218,7 @@ impl Socket {
 
     /// This one doesn't fail extensively... all possible retries & recoveries are already tested in connect() & send().\
     /// Here, we are just interested into exploring the API over a function that produces results, instead of consuming it (like send() does)
-    pub fn receive(&self) -> Result<&'static str, TransportErrors<&'static str>> {
+    pub(crate) fn receive_raw(&self) -> Result<&'static str, TransportErrors<&'static str>> {
         if !self.is_connected() {
             Err(TransportErrors::NotConnected { payload: None })
         } else {
@@ -230,9 +232,9 @@ impl Socket {
     // ////////////////////////////
     // Simply maps the standard `Result<>` types used in (1) to [crate::RetryResult]
 
-    /// Wrapper around [Self::connect_to_server()], enabling `keen-retry` on it
-    pub async fn connect_to_server_retry(&self) -> RetryProcedureResult<ConnectionErrors> {
-        self.connect_to_server().await
+    /// Wrapper around [Self::connect_to_server_raw()], enabling `keen-retry` on it
+    pub async fn connect_to_server(&self) -> RetryProcedureResult<ConnectionErrors> {
+        self.connect_to_server_raw().await
             .map_or_else(|error| match error.is_fatal() {
                             true  => RetryProcedureResult::Fatal     { input: (), error },
                             false => RetryProcedureResult::Transient { input: (), error },
@@ -240,13 +242,16 @@ impl Socket {
                          |_| RetryProcedureResult::Ok { reported_input: (), output: () })
     }
 
-    /// Wrapper around [Self::send()], enabling `keen-retry` on it
-    pub fn send_retry<T: Debug + PartialEq>
-                 (&self,
-                  payload: T)
-                 -> RetryConsumerResult<(), T, TransportErrors<T>> {
+    /// Wrapper around [Self::send_raw()], enabling `keen-retry` on it
+    /// -- but not supposed to be public in this demonstration, as the public
+    /// method [Self::send()] adds a small retry logic layer to show off the
+    /// composition of nested retry policies.
+    pub(crate) fn send_retryable<T: Debug + PartialEq>
+                                (&self,
+                                 payload: T)
+                                -> RetryConsumerResult<(), T, TransportErrors<T>> {
 
-        self.send(payload)
+        self.send_raw(payload)
             .map_or_else(|error| match error.is_fatal() {
                              true  => {
                                  let (payload, error) = error.split();
@@ -260,10 +265,10 @@ impl Socket {
                          |_| RetryConsumerResult::Ok { reported_input: (), output: () })
     }
 
-    /// Wrapper around [Self::receive_retry()], enabling `keen-retry` on it
-    pub fn receive_retry(&self) -> RetryProducerResult<&'static str, TransportErrors<&'static str>> {
+    /// Wrapper around [Self::receive()], enabling `keen-retry` on it
+    pub fn receive(&self) -> RetryProducerResult<&'static str, TransportErrors<&'static str>> {
 
-        self.receive()
+        self.receive_raw()
             .map_or_else(|error| match error.is_fatal() {
                              true  => RetryProducerResult::Fatal     { input: (), error },
                              false => RetryProducerResult::Transient { input: (), error },
@@ -271,6 +276,42 @@ impl Socket {
                          |payload| RetryProducerResult::Ok  { reported_input: (), output: payload })
     }
 
+
+    // 4) The `keen-retry` composable retry policies at the library level
+    // //////////////////////////////////////////////////////////////////
+    // They extend the normal `keen-retry` library integration with portions
+    // of a retry strategy using the `.or_else()` high order function
+
+    /// Wrapper around [Self::send_raw()], enabling `keen-retry` on it and adding a layer
+    /// to the retrying process: check if the connection is ok and attempt to reconnect.\
+    /// This wrapper demonstrates how to add the composable retry policy in the Library level
+    /// -- for a composable retry policy in the application level, see [use_cases::broadcast()].
+    pub async fn send<T: Debug + PartialEq>
+                     (&self,
+                      payload: T)
+                     -> RetryConsumerResult<(), T, TransportErrors<T>> {
+
+        self.send_retryable(payload)
+            .or_else_with_async(|payload, error| async {
+                if !self.is_connected() {
+                    match self.connect_to_server().await {
+                        RetryResult::Transient { input, error } => {
+                            warn!("## `external_lib::send({payload:?})`: Transient failure attempting to reconnect: {}", error);
+                        },
+                        RetryResult::Fatal { input: _, error } => {
+                            error!("## `external_lib::send({payload:?})`: Error attempting to reconnect (won't retry): {}", error);
+                            return RetryResult::Fatal { input: payload, error: TransportErrors::CannotReconnect { payload: None, root_cause: error.into() } };
+                        },
+                        _ => {
+                            info!("## `external_lib::send({payload:?})`: Reconnection succeeded after retrying");
+                        },
+                    }
+                }
+                RetryResult::Transient { input: payload, error }
+            })
+            .await
+
+    }
 
 
 

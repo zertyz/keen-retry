@@ -19,19 +19,22 @@ license       = "Unlicense"
 
 
 [dependencies]
+log = "0.4"
 futures = "0.3"
 tokio = { version = "1", features = ["full"] }
 rand = "0.8"
 
 
 [dev-dependencies]
-thiserror = "1.0"
+ctor          = "0.2"    # setup and teardown for modules
+simple_logger = "4.0"    # a dirty console logger
+thiserror     = "1.0"
 
 
 # dependencies for benchmarks
 #############################
 
-criterion    = { version = "0.5", features=["html_reports"] }
+criterion = { version = "0.5", features=["html_reports"] }
 
 [[bench]]
 name = "zero_cost_abstractions"
