@@ -310,7 +310,6 @@ impl Socket {
                 RetryResult::Transient { input: payload, error }
             })
             .await
-
     }
 
 

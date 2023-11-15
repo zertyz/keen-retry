@@ -192,7 +192,8 @@ RetryResult<ReportedInput,
         }
     }
 
-    /// TODO: add the docs
+    /// Applies the given closure to the operation if it was `Transient` -- useful
+    /// for composing retry procedures in the library level
     #[inline(always)]
     pub fn or_else_with<F: FnOnce(OriginalInput, ErrorType) -> Self>
                        (self, f: F)
@@ -204,7 +205,8 @@ RetryResult<ReportedInput,
         }
     }
 
-    /// TODO: add the docs
+    /// Applies the given async closure to the operation if it was `Transient` -- useful
+    /// for composing retry procedures in the library level
     #[inline(always)]
     pub async fn or_else_with_async<F:            FnOnce(OriginalInput, ErrorType) -> OutputFuture,
                                     OutputFuture: Future<Output=Self>>
@@ -215,15 +217,6 @@ RetryResult<ReportedInput,
             RetryResult::Ok { reported_input, output } => RetryResult::Ok    { reported_input, output },
             RetryResult::Fatal { input, error }       => RetryResult::Fatal { input, error },
         }
-    }
-
-    /// TODO: add the docs
-    #[inline(always)]
-    pub fn or_else_with_supplier<RetryFnOutput,
-                                 LibraryRetryFn: FnMut() -> RetryFnOutput>
-                                ()
-                                -> RetryResult<ReportedInput, LibraryRetryFn, Output, ErrorType> {
-        todo!()
     }
 
     /// Upgrades this [RetryResult] into a [KeenRetryExecutor], which will, on its turn, be upgraded to [crate::ResolvedResult],
@@ -258,13 +251,13 @@ RetryResult<ReportedInput,
     }
 
     /// Returns `true` if the operation succeeded.\
-    /// Also mimmics the `Result<>` API for users that don't opt-in for the `keen-retry` API.
+    /// Also mimics the `Result<>` API for users that don't opt-in for the `keen-retry` API.
     #[inline(always)]
     pub fn is_ok(&self) -> bool {
         matches!(self, RetryResult::Ok {..})
     }
 
-    /// Mimmics the `Result<>` API for users that don't opt-in for the `keen-retry` API:
+    /// Mimics the `Result<>` API for users that don't opt-in for the `keen-retry` API:
     /// simply returns `true` if the error is [Self::Fatal] or [Self::Transient].
     #[inline(always)]
     pub fn is_err(&self) -> bool {
