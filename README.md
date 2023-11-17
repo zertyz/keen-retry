@@ -38,8 +38,8 @@ pub async fn connect_to_server(&self) -> RetryProcedureResult<ConnectionErrors> 
 
 Now, in the application, you may use it via the zero-cost functional API:
 ```rust
-let resolved = library_function()
-    .retry_with(|input| handle_transient(input))
+let resolved = connect_to_server()
+    .retry_with(|_| connect_to_server())
     .<one-of-the-backoff-strategies>(...)
     .<instrumentation-facilities>(...);
 ```
