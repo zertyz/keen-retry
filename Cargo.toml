@@ -4,7 +4,7 @@ version = "0.3.0"
 edition = "2021"
 description   = "A simple -- yet powerful -- zero-cost-abstractions & zero-copy lib for error handling & recovery"
 keywords      = ["functional", "zero-copy", "zero-cost", "async", "performance"]
-categories    = ["asynchronous", "production", "rust-patterns"]
+categories    = ["asynchronous", "network-programming", "rust-patterns"]
 readme        = "README.md"
 authors       = ["Luiz Silveira <zertyz@gmail.com>"]
 homepage      = "https://github.com/zertyz/keen-retry"
@@ -17,12 +17,17 @@ license       = "Unlicense"
 
 [workspace]
 
+[features]
+default = ["async"]
+async = ["tokio", "futures"]
+no-async = []
+
 
 [dependencies]
 log = "0.4"
-futures = "0.3"
-tokio = { version = "1", features = ["full"] }
 rand = "0.8"
+futures = { version = "0.3", optional = true }
+tokio = { version = "1", features = ["full"], optional = true }
 
 
 [dev-dependencies]

@@ -1,48 +1,71 @@
 # keen-retry
 
-A simple -- yet powerful -- zero-cost-abstractions & zero-copy lib for error handling & recovery -- with the following functionalities, focusing on performance and code expressiveness:
-  * Provides an idiomatic, Rust-like, API by allowing operations to *return a retryable type* -- using a functional approach for expressing the retry logic in par with what we have for `Result<>` and `Option<>`. This eases *building pipelines of retryable operations immune to the callback-hell phenomenon*;
-  * Zero-cost-abstractions: if the operation succeeds or fails fatably in the initial attempt, no extra code is run -- zero-cost if no retrying is necessary;
-  * Distinct operations for the first (initial) attempt and the retrying ones, allowing the retryable operations to do extra (expensive) checks for detailed instrumentation, error reporting and, possibly, more elaborated (nested) retrying logics (such as reconnecting to a server if a channel detected a connection drop while sending a payload -- in this case, a failure in retrying a connection might either be transient or fatal: *the server might say it is full and that we should try another peer, or it might say the given credentials are not recognized*);
-  * Full support for both `sync` and `async` operations.
+## Introduction
 
-# Components
-  * Wrappers on retryable operations' return type -- similar (and conversible) to `Result<>`:
-    - `RetryConsumerResult` -- for zero-copy consumers that consume the payload on success, returning them back on Error. Pattern examples: `crossbeam` & `reactive-mutiny` channels;
-    - `ProducerRetryResult` -- for operations that take no input, but may return data;
-    - `RetryResult`         -- for operations that consume the input on success (or fatal failure) and return data;
-  * The `KeenRetry[Async]Executor`, responsible for executing the retry logic according to the chosen backoff algorithm and limits;
-  * `ResolvedResult`, containing all possibilities for the retryable operations (conversible to `Result<>`): `Ok` (on the first attempt), `Fatal` (on the first attempt), `Recovered` (Ok on a retry attempt), `GavenUp` (exceeded retry attempts), `Unrecoverable` (Fatal on a retry attempt). Also contain some nice facilities for instrumentation (like building a succinct report of the retry errors, to ease logging)
+The `keen-retry` crate is designed to provide a zero-cost, flexible, and robust way to implement retry logic in Rust applications, while also
+supporting adding resiliency to libraries. Whether you are developing an API, a high-performance system, a distributed application, or a simple
+tool, `keen-retry` offers a comprehensive set of features to handle transient failures gracefully, ensuring your application remains resilient,
+reliable and is able to provide rich diagnostic messages, indispensable for addressing the root cause of failures.
 
-# Taste it
+## Features
 
-First, the operation must adhere to the `keen-retry` API -- to distinguish whether retrying is necessary:
+  -  **Zero-Cost Abstraction**: Leverages Rust's powerful type system and compile-time optimizations to offer retry capabilities with no runtime overhead.
+  -  **Clear Error Discrimination**: Retrying operations that fail due to non-transient errors is futile, can waste resources and may ruin the application performance.
+  -  **Instrumentation and Logging**: Comprehensive logging and instrumentation features for observing and debugging retry operations.
+  -  **Composable Retry Logic**: Easily chainable and composable retry operations, allowing for clean and maintainable code.
+  -  **Async/Await Support**: First-class support for asynchronous programming, compatible with Tokio and other async runtimes.
+  -  **Flexible Backoff Strategies**: Includes various backoff strategies, from simple constant delays to sophisticated exponential backoff with jitter, suitable for different scenarios and needs.
 
-```nocompile
-    async fn connect_to_server_retry(&self) -> RetryConsumerResult<(), (), ConnectionErrors> {
-        self.connect_to_server_raw().await
-            .map_or_else(|error| match error.is_fatal() {
-                            true  => RetryConsumerResult::Fatal { input: (), error },
-                            false => RetryConsumerResult::Retry { input: (), error },
-                         },
-                         |_| RetryConsumerResult::Ok { reported_input: (), output: () })
-    }
+## Quick Start
+
+### Integrate your Library / API
+
+The first step is to have every retryable operation from your Library or API returning the enriched `RetryResult` type, which clearly discriminates between `Ok`, `Fatal` and `Transient` variants:
+
+```rust
+/// Wrapper around [Self::connect_to_server_raw()], enabling `keen-retry` on it
+pub async fn connect_to_server(&self) -> RetryProcedureResult<ConnectionErrors> {
+  self.connect_to_server_raw().await
+    .map_or_else(|error| match error.is_fatal() {
+                   true  => RetryResult::Fatal     { input: (), error },
+                   false => RetryResult::Transient { input: (), error },
+                 },
+                 |_| RetryResult::Ok { reported_input: (), output: () })
+}
 ```
 
-Then, a simple retryable logic:
+### Usage
 
-```nocompile
-    pub async fn connect_to_server(self: &Arc<Self>) -> Result<(), ConnectionErrors> {
-        let cloned_self = Arc::clone(&self);
-        self.connect_to_server_retry().await
-            .retry_with_async(|_| cloned_self.connect_to_server_retry())
-            .with_delays((10..=130).step_by(10).map(|millis| Duration::from_millis(millis)))    // 13 attempts with an arithmetic progression on the sleeping time between attempts
-            .await
-            .inspect_recovered(|_, _, loggable_retry_errors, retry_errors_list| println!("## `connect_to_server()`: successfully connected after retrying {} times (failed attempts: [{loggable_retry_errors}])", retry_errors_list.len()))
-            .into()
-    }
-
+Now, in the application, you may use it via the zero-cost functional API:
+```rust
+let resolved = library_function()
+    .retry_with(|input| handle_transient(input))
+    .<one-of-the-backoff-strategies>(...)
+    .<instrumentation-facilities>(...);
 ```
 
-For a fully fledged instrumentation, as seen in production applications, take a look at `tests/use_cases.rs`,
-where all operations, errors, and nested levels of retries are demonstrated.
+### The `keen-retry` Diagram
+
+![keen-retry-diagram.png](docs/keen-retry-diagram.png)
+
+
+For more details, please refer to `tests/use_cases.rs`, which contains advanced
+demonstrations such as how to add a fully fledged instrumentation (as seen in production applications),
+how to compose nested retry logics and how to implement the versatile "Partial Completion with Continuation
+Closure" design pattern.
+
+## Performance Analysis
+
+`keen-retry` has been rigorously benchmarked to ensure it adheres to the zero-cost abstraction principle, crucial in systems programming.
+Our benchmarks, available at `benches/zero_cost_abstractions.rs`, demonstrate the efficiency of the crate.
+
+![keen-retry-zero-cost-abstractions.png](docs/keen-retry-zero-cost-abstractions.png)
+
+
+## The Book
+
+For a deep dive into the applicable Design Patterns, principles, strategies, and best practices for using `keen-retry` effectively,
+be sure to explore our companion [keen-retry crate's Book](docs/keen-retry-book.pdf), which serves as a definitive guide, providing insights and practical
+examples to harness the full potential of `keen-retry` in various software development scenarios.
+
+[![The keen-retry Book](docs/keen-retry-book-cover.jpg)](docs/keen-retry-book.pdf)

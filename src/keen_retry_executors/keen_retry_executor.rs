@@ -80,16 +80,16 @@ KeenRetryExecutor<ReportedInput,
     /// The recommended backoff strategy when retrying operations that consume external / shared resources -- such as network services.
     /// This strategy delays each attempt by a growing duration + a random component, so to avoid the "thundering herd problem".
     /// Moreover, it allows the first retry to be done immediately, if the `range_millis` starts with zero -- this assumes any failures
-    /// are rare and may be handled immedialy by another node upon retrying. If this doesn't hold true, further re-attempts will be delayed.\
+    /// are rare and may be handled immediately by another node upon retrying. If this doesn't hold true, further re-attempts will be delayed.\
     /// Calling this method upgrades this [KeenRetryExecutor] into the final [ResolvedResult].\
     /// See also:
     ///   * [Self::spinning_forever()] or [Self::spinning_until_timeout()] for retrying local operations;
     ///   * [Self::with_delays()] for custom backoffs.
     #[inline(always)]
     pub fn with_exponential_jitter(self,
-                                   config: ExponentialJitter<ErrorType>)
-                                  -> ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType> {
-        match config {
+                                   config_fn: impl FnOnce() -> ExponentialJitter<ErrorType>)
+                                   -> ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType> {
+        match config_fn() {
         
             ExponentialJitter::FromBackoffRange {
                 backoff_range_millis,

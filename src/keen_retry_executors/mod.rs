@@ -6,4 +6,6 @@ mod common;
 pub use common::*;
 
 pub mod keen_retry_executor;
+
+#[cfg(feature = "async")]
 pub mod keen_retry_async_executor;

@@ -4,7 +4,6 @@ use crate::{
     keen_retry_executor::KeenRetryExecutor,
     keen_retry_async_executor::KeenRetryAsyncExecutor,
 };
-use std::future::Future;
 
 
 // Some suggar types:
@@ -207,9 +206,10 @@ RetryResult<ReportedInput,
 
     /// Applies the given async closure to the operation if it was `Transient` -- useful
     /// for composing retry procedures in the library level
+    #[cfg(feature = "async")]
     #[inline(always)]
     pub async fn or_else_with_async<F:            FnOnce(OriginalInput, ErrorType) -> OutputFuture,
-                                    OutputFuture: Future<Output=Self>>
+                                    OutputFuture: std::future::Future<Output=Self>>
                                    (self, f: F)
                                    -> Self {
         match self {
@@ -236,9 +236,10 @@ RetryResult<ReportedInput,
 
     /// Upgrades this [RetryResult] into a [KeenRetryAsyncExecutor], which will, on its turn, be upgraded to [crate::ResolvedResult],
     /// containing the final results after executing the retrying process
+    #[cfg(feature = "async")]
     #[inline(always)]
     pub fn retry_with_async<AsyncRetryFn: FnMut(OriginalInput) -> OutputFuture,
-                            OutputFuture: Future<Output=RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>>
+                            OutputFuture: std::future::Future<Output=RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>>
                            (self,
                             retry_operation: AsyncRetryFn)
                            -> KeenRetryAsyncExecutor<ReportedInput, OriginalInput, Output, ErrorType, AsyncRetryFn, OutputFuture> {

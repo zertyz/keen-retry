@@ -214,7 +214,7 @@ async fn keen_connect_to_server(socket: &Arc<Socket>) -> Result<(), ConnectionEr
     let cloned_socket = Arc::clone(socket);
     socket.connect_to_server().await
         .retry_with_async(|_| cloned_socket.connect_to_server())
-        .with_exponential_jitter(keen_retry::ExponentialJitter::FromBackoffRange { backoff_range_millis: 10..=130, re_attempts: 10, jitter_ratio: 0.1 })
+        .with_exponential_jitter(|| keen_retry::ExponentialJitter::FromBackoffRange { backoff_range_millis: 10..=130, re_attempts: 10, jitter_ratio: 0.1 })
         .await
         .inspect_recovered(|_, _, retry_errors_list| warn!("`keen_connect_to_server()`: successfully connected after retrying {} times (failed attempts: [{}])",
                                                                                retry_errors_list.len(), keen_retry::loggable_retry_errors(retry_errors_list)))
@@ -248,7 +248,7 @@ async fn keen_send<T: Debug + PartialEq>
                 .map_ok(|_, _| ((loggable_payload.clone(), retry_start.elapsed().unwrap_or_default()), () ))
                 .map_input(|payload| (loggable_payload, payload, retry_start) )
         })
-        .with_exponential_jitter(keen_retry::ExponentialJitter::FromBackoffRange { backoff_range_millis: 0..=100, re_attempts: 10, jitter_ratio: 0.1 })
+        .with_exponential_jitter(|| keen_retry::ExponentialJitter::FromBackoffRange { backoff_range_millis: 0..=100, re_attempts: 10, jitter_ratio: 0.1 })
         .await
         .inspect_given_up(|(_loggable_payload, payload, retry_start), retry_errors_list, fatal_error|
             error!("`keen_send({payload:?})` FAILED after exhausting all {} retrying attempts in {:?} with error {fatal_error:?}. Previous transient failures were: [{}]",
@@ -295,7 +295,7 @@ async fn keen_receive(socket: &Arc<Socket>) -> Result<&'static str, TransportErr
                 .map_ok(|_, received| ( retry_start.elapsed().unwrap_or_default(), received ) )
                 .map_input(|_| retry_start )
         })
-        .with_exponential_jitter(keen_retry::ExponentialJitter::FromBackoffRange { backoff_range_millis: 0..=100, re_attempts: 10, jitter_ratio: 0.1 })
+        .with_exponential_jitter(|| keen_retry::ExponentialJitter::FromBackoffRange { backoff_range_millis: 0..=100, re_attempts: 10, jitter_ratio: 0.1 })
         .await
         .inspect_given_up(|retry_start, retry_errors_list, fatal_error|
             println!("## `keen_receive()` FAILED after exhausting all {} retrying attempts in {:?} with error {fatal_error:?}. Previous transient failures were: [{}]",
@@ -395,7 +395,7 @@ async fn keen_broadcast<T: Debug + PartialEq + Clone + 'static>
     let mut continuation_closure = broadcast_continuation_closure(payload);
     continuation_closure(()).await
         .retry_with_async(continuation_closure)
-        .with_exponential_jitter(keen_retry::ExponentialJitter::FromBackoffRange { backoff_range_millis: 1000..=10000, re_attempts: 10, jitter_ratio: 0.2 })
+        .with_exponential_jitter(|| keen_retry::ExponentialJitter::FromBackoffRange { backoff_range_millis: 1000..=10000, re_attempts: 10, jitter_ratio: 0.2 })
         .await
         .inspect_unrecoverable(|_, remaining_errors, fatal_failures| warn!("Fatal failures found during the Broadcast: {}", keen_retry::loggable_retry_errors(fatal_failures)))
         .into_result()
