@@ -68,4 +68,4 @@ For a deep dive into the applicable Design Patterns, principles, strategies, and
 be sure to explore our companion [keen-retry crate's Book](docs/keen-retry-book.pdf), which serves as a definitive guide, providing insights and practical
 examples to harness the full potential of `keen-retry` in various software development scenarios.
 
-[![The keen-retry Book](docs/keen-retry-book-cover.jpg)](docs/keen-retry-book.pdf)
+[![The keen-retry Book](docs/keen-retry-book-cover.jpg)](https://archive.org/download/keen-retry-book/keen-retry-book.pdf)
