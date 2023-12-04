@@ -1,5 +1,7 @@
 //! Resting place for [ResolvedResult], representing the final outcome of a retryable operation
 
+use crate::RetryResult;
+
 
 /// Contains all possibilities for finished retryable operations -- conversible to `Result<>` --
 /// and some nice facilities for instrumentation (like building a succinct report of the retry errors).\
@@ -63,6 +65,16 @@ ResolvedResult<ReportedInput,
                OriginalInput,
                Output,
                ErrorType> {
+
+    /// Builds an instance from the given `Result`
+    #[inline(always)]
+    pub fn from_retry_result(retry_result: RetryResult<ReportedInput, OriginalInput, Output, ErrorType>) -> Self {
+        match retry_result {
+            RetryResult::Ok        { reported_input, output } => ResolvedResult::Ok { reported_input, output },
+            RetryResult::Transient { input, error }        => ResolvedResult::GivenUp { input, retry_errors: vec![], fatal_error: error },
+            RetryResult::Fatal     { input, error }        => ResolvedResult::Fatal { input, error },
+        }
+    }
 
     /// Builds an instance with the results of an operation that suceeded at the first attempt.
     ///   * `output` represents the data returned by the operation.
