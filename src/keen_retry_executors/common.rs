@@ -77,14 +77,13 @@ pub fn exponential_jitter_from_range(backoff_range_millis: RangeInclusive<u32>, 
 
 pub fn exponential_jitter_from_expoent(initial_backoff_millis: u32, expoent: f64, re_attempts: u8, jitter_ratio: f32) -> impl Iterator<Item=Duration> {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
     let initial_backoff_millis = initial_backoff_millis as f64;
     let jitter_ratio = jitter_ratio as f64;
     let power_addition = initial_backoff_millis.log(expoent).max(0.0);
     (0..re_attempts)
         .map(move |power| expoent.powf(power as f64 + power_addition))
         .map(move |millis| if millis == 1.0 { initial_backoff_millis } else { millis })
-        .map(move |millis| millis*rng.gen_range((1.0-jitter_ratio)..=(1.0+jitter_ratio)) )
+        .map(move |millis| millis*rand::thread_rng().gen_range((1.0-jitter_ratio)..=(1.0+jitter_ratio)) )
         .map(|jittered_millis| Duration::from_millis(jittered_millis as u64))
 }
 
