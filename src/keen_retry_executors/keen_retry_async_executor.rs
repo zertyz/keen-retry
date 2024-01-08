@@ -266,3 +266,53 @@ KeenRetryAsyncExecutor<ReportedInput,
     }
 
 }
+
+impl<ReportedInput,
+     OriginalInput,
+     Output,
+     ErrorType,
+     AsyncRetryFn: FnMut(OriginalInput) -> OutputFuture,
+     OutputFuture: Future<Output=RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>>
+From<KeenRetryAsyncExecutor<ReportedInput,
+                            OriginalInput,
+                            Output,
+                            ErrorType,
+                            AsyncRetryFn,
+                            OutputFuture>> for
+RetryResult<ReportedInput,
+            OriginalInput,
+            Output,
+            ErrorType> {
+
+    /// Allows compile-time transformation of a "unexecuted" keen retry executor back into its original `RetryResult`, enabling extra flexibility
+    /// in patterns like the following -- from the `reactive-messaging` crate:
+    /// ```nocompile
+    ///         let retryable = retry_result_supplier(SystemTime::now()).await  // this is the common code -- the same for
+    ///             .retry_with_async(retry_result_supplier);                   // the cases with and without retrying bellow
+    ///         let resolved_result = match config.retrying_strategy {
+    ///             RetryingStrategies::DoNotRetry =>
+    ///                 ResolvedResult::from_retry_result(retryable.into()),  // flexibly bail out the executor
+    ///                                                                       // (enabling the first line as the common code for all cases)
+    ///             RetryingStrategies::RetryWithBackoffUpTo(attempts) =>
+    ///                 retryable
+    ///                     .with_exponential_jitter(|| ExponentialJitter::FromBackoffRange {
+    ///                         backoff_range_millis: 1..=(2.526_f32.powi(attempts as i32) as u32),
+    ///                         re_attempts: attempts,
+    ///                         jitter_ratio: 0.2,
+    ///                     })
+    ///                     .await,
+    /// 
+    ///             RetryingStrategies::RetryYieldingForUpToMillis(millis) =>
+    ///                 retryable
+    ///                     .yielding_until_timeout(Duration::from_millis(millis as u64), || Box::from(format!("Timed out (>{millis}ms) while attempting to connect to {}:{}", self.host, self.port)))
+    ///                     .await,
+    ///         };
+    #[inline(always)]
+    fn from(executor: KeenRetryAsyncExecutor<ReportedInput, OriginalInput, Output, ErrorType, AsyncRetryFn, OutputFuture>) -> Self {
+        match executor {
+            KeenRetryAsyncExecutor::ResolvedOk  { reported_input, output }                                     => RetryResult::Ok        { reported_input, output },
+            KeenRetryAsyncExecutor::ToRetry     { input, retry_async_operation: _, mut retry_errors }  => RetryResult::Transient { input, error: retry_errors.pop().expect("BUG (popping)") },
+            KeenRetryAsyncExecutor::ResolvedErr { original_input, error }                                   => RetryResult::Fatal     { input: original_input, error }
+        }
+    }
+}

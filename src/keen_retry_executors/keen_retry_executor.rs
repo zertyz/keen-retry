@@ -249,3 +249,51 @@ KeenRetryExecutor<ReportedInput,
         }
     }
 }
+
+impl<ReportedInput,
+     OriginalInput,
+     Output,
+     ErrorType,
+     RetryFn: FnMut(OriginalInput) -> RetryResult<ReportedInput, OriginalInput, Output, ErrorType>>
+From<KeenRetryExecutor<ReportedInput,
+                            OriginalInput,
+                            Output,
+                            ErrorType,
+                            RetryFn>> for
+RetryResult<ReportedInput,
+            OriginalInput,
+            Output,
+            ErrorType> {
+
+    /// Allows compile-time transformation of a "unexecuted" keen retry executor back into its original `RetryResult`, enabling extra flexibility
+    /// in patterns like the following -- from the `reactive-messaging` crate:
+    /// ```nocompile
+    ///         let retryable = retry_result_supplier(SystemTime::now())      // this is the common code -- the same for
+    ///             .retry_with_async(retry_result_supplier);                 // the cases with and without retrying bellow
+    ///         let resolved_result = match config.retrying_strategy {
+    ///             RetryingStrategies::DoNotRetry =>
+    ///                 ResolvedResult::from_retry_result(retryable.into()),  // flexibly bail out the executor
+    ///                                                                       // (enabling the first line as the common code for all cases)
+    ///             RetryingStrategies::RetryWithBackoffUpTo(attempts) =>
+    ///                 retryable
+    ///                     .with_exponential_jitter(|| ExponentialJitter::FromBackoffRange {
+    ///                         backoff_range_millis: 1..=(2.526_f32.powi(attempts as i32) as u32),
+    ///                         re_attempts: attempts,
+    ///                         jitter_ratio: 0.2,
+    ///                     })
+    ///                     .await,
+    /// 
+    ///             RetryingStrategies::RetrySpinningForUpToMillis(millis) =>
+    ///                 retryable
+    ///                     .spinning_until_timeout(Duration::from_millis(millis as u64), || Box::from(format!("Timed out (>{millis}ms) while attempting to connect to {}:{}", self.host, self.port)))
+    ///                     .await,
+    ///         };
+    #[inline(always)]
+    fn from(executor: KeenRetryExecutor<ReportedInput, OriginalInput, Output, ErrorType, RetryFn>) -> Self {
+        match executor {
+            KeenRetryExecutor::ResolvedOk  { reported_input, output }                               => RetryResult::Ok        { reported_input, output },
+            KeenRetryExecutor::ToRetry     { input, retry_operation: _, mut retry_errors }  => RetryResult::Transient { input, error: retry_errors.pop().expect("BUG (popping)") },
+            KeenRetryExecutor::ResolvedErr { original_input, error }                             => RetryResult::Fatal     { input: original_input, error }
+        }
+    }
+}
