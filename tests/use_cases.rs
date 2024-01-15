@@ -14,7 +14,7 @@
 
 mod external_lib;
 use external_lib::*;
-use keen_retry::{RetryConsumerResult, RetryProcedureResult, RetryResult};
+use keen_retry::{RetryProcedureResult, RetryResult};
 use std::{
     fmt::Debug,
     time::{Duration, SystemTime},
@@ -278,7 +278,7 @@ async fn keen_send<T: Debug + PartialEq>
 /// A more realistic demonstration of a possible real usage of the `keen-retry` API (in opposition to the fully fledged one in [keen_send()]).\
 /// Here, apart from the retrying logic & constraints, you will find detailed instrumentation with measurements for the time spent in
 /// backoffs + reattempts, if retrying kicks in.
-async fn keen_receive(socket: &Arc<Socket>) -> Result<&'static str, TransportErrors<&'static str>> {
+async fn _keen_receive(socket: &Arc<Socket>) -> Result<&'static str, TransportErrors<&'static str>> {
     socket.receive()
         .inspect_fatal(|_, fatal_err|
             println!("## `keen_receive()`: fatal error (won't retry): {:?}", fatal_err))
@@ -324,7 +324,7 @@ fn broadcast_continuation_closure<T: Clone + Debug + PartialEq + 'static>
                        (payload: T)
                        -> impl FnMut(()) -> Pin < Box < dyn Future < Output=RetryProcedureResult<Box<Vec<TransportErrors<T>>>> > > >  {
 
-    let mut list_of_targets_ptr = Box::into_raw(Box::new(vec![
+    let list_of_targets_ptr = Box::into_raw(Box::new(vec![
         // this one will fail transiently on the first connection
         Socket::new(2, 999, 1, 999),
         // this one will fail transiently on the first sending attempt
@@ -332,7 +332,7 @@ fn broadcast_continuation_closure<T: Clone + Debug + PartialEq + 'static>
         // this one will fail fatably, always, and won't ever be sent -- not even after all retries
         Socket::new(1, 999, 999, 1),
     ]));
-    let mut fatal_failures_ptr = Box::into_raw(Box::new(Vec::new()));
+    let fatal_failures_ptr = Box::into_raw(Box::new(Vec::new()));
 
     info!("Starting BROADCAST");
 
@@ -359,7 +359,7 @@ fn broadcast_continuation_closure<T: Clone + Debug + PartialEq + 'static>
                         transient_failed_targets.push(target);
                         transient_failures.push(error)
                     },
-                    RetryResult::Fatal { input, error } => {
+                    RetryResult::Fatal { input: _, error } => {
                         fatal_failures.push(error);
                     },
                     _ => (),
@@ -397,6 +397,6 @@ async fn keen_broadcast<T: Debug + PartialEq + Clone + 'static>
         .retry_with_async(continuation_closure)
         .with_exponential_jitter(|| keen_retry::ExponentialJitter::FromBackoffRange { backoff_range_millis: 1000..=10000, re_attempts: 10, jitter_ratio: 0.2 })
         .await
-        .inspect_unrecoverable(|_, remaining_errors, fatal_failures| warn!("Fatal failures found during the Broadcast: {}", keen_retry::loggable_retry_errors(fatal_failures)))
+        .inspect_unrecoverable(|_, _, fatal_failures| warn!("Fatal failures found during the Broadcast: {}", keen_retry::loggable_retry_errors(fatal_failures)))
         .into_result()
 }

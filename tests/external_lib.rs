@@ -20,13 +20,10 @@ use std::{
         Arc,
     },
 };
-use std::future::Future;
-use std::pin::Pin;
 use log::{error, info, warn};
 
 use keen_retry::{RetryConsumerResult, RetryProcedureResult, RetryProducerResult, RetryResult};
 use thiserror::Error;
-use keen_retry::keen_retry_async_executor::KeenRetryAsyncExecutor;
 
 
 // 1) CUSTOM ERROR DEFINITIONS
@@ -295,7 +292,7 @@ impl Socket {
             .or_else_with_async(|payload, error| async {
                 if !self.is_connected() {
                     match self.connect_to_server().await {
-                        RetryResult::Transient { input, error } => {
+                        RetryResult::Transient { input: _, error } => {
                             warn!("## `external_lib::send({payload:?})`: Transient failure attempting to reconnect: {}", error);
                         },
                         RetryResult::Fatal { input: _, error } => {
