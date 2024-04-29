@@ -27,7 +27,7 @@ no-async = []
 log = "0.4"
 rand = "0.8"
 futures = { version = "0.3", optional = true }
-tokio = { version = "1", features = ["full"], optional = true }
+tokio = { version = "1", features = ["rt", "time", "macros"], optional = true }
 
 
 [dev-dependencies]
