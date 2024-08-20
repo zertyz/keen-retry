@@ -336,11 +336,34 @@ ResolvedResult<ReportedInput,
         }
     }
 
-    /// Syntatic sugar for [Result<Output, ErrorType>::from()].\
+    /// Syntactic sugar for [Result<Output, ErrorType>::from()].\
     /// See also [Self::into()]
     #[inline(always)]
     pub fn into_result(self) -> Result::<Output, ErrorType> {
         Result::<Output, ErrorType>::from(self)
+    }
+
+    /// Consumes this object into a `Result` and, in case [Self::is_failure()],
+    /// `Err` will come from the given closure:
+    /// ```nocompile
+    ///   FnOnce(retry_errors: Vec<ErrorType>, fatal_error: ErrorType) -> MappedErrorType {...}
+    /// ```
+    ///
+    /// Example:
+    /// ```nocompile
+    ///     self.into_result_mapping_errors(errors_to_occurrences_count)
+    ///     // returns `Result<Ok, HashMap<Error, u16>>`
+    pub fn into_result_mapping_errors<MappedErrorType>(self,
+                                                       errors_map_fn: impl FnOnce(/*retry_errors: */Vec<ErrorType>,
+                                                                                  /*fatal_error:  */ErrorType) -> MappedErrorType,
+                                                      ) -> Result<Output, MappedErrorType> {
+        match self {
+            ResolvedResult::Ok { reported_input: _, output }                                      => Ok(output),
+            ResolvedResult::Fatal { input: _, error }                                           => Err(errors_map_fn(vec![], error)),
+            ResolvedResult::Recovered { reported_input: _, output, retry_errors: _ }              => Ok(output),
+            ResolvedResult::GivenUp { input: _, retry_errors, fatal_error }       => Err(errors_map_fn(retry_errors, fatal_error)),
+            ResolvedResult::Unrecoverable { input: _, retry_errors, fatal_error } => Err(errors_map_fn(retry_errors, fatal_error)),
+        }
     }
 
 }
@@ -373,7 +396,10 @@ use std::{
     fmt::Debug,
     collections::BTreeMap,
 };
-/// builds an as-short-as-possible list of `retry_errors` occurrences (out of order),
+use std::collections::HashMap;
+use std::hash::Hash;
+
+/// Builds an as-short-as-possible list of `retry_errors` occurrences (out of order),
 /// provided `ErrorType` implements the `Debug` trait.
 pub fn loggable_retry_errors<ErrorType: Debug>(retry_errors: &Vec<ErrorType>) -> String {
     let mut counts = BTreeMap::<String, u32>::new();
@@ -385,4 +411,21 @@ pub fn loggable_retry_errors<ErrorType: Debug>(retry_errors: &Vec<ErrorType>) ->
         .map(|(error, count)| format!("{count}x: '{error}'"))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// Consumes both `retry_errors` and `fatal_error` (from failed [ResolvedResult] and returns back
+/// a hashmap of error occurrence counts in the form:
+/// ```nocompile
+///     HashMap<ErrorType, u16>
+pub fn errors_to_occurrences_count<ErrorType: Eq + Hash>
+                                  (retry_errors: Vec<ErrorType>,
+                                   fatal_error:  ErrorType)
+                                  -> HashMap<ErrorType, u16> {
+    retry_errors
+        .into_iter()
+        .chain([fatal_error].into_iter())
+        .fold(HashMap::new(), |mut acc, item| {
+            *acc.entry(item).or_insert(0) += 1;
+            acc
+        })
 }

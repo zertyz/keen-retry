@@ -39,7 +39,7 @@ pub type StdErrorType = Box<dyn std::error::Error + Send + Sync>;
 /// Custom error types when connecting.\
 /// Custom error types goes hand-in-hand with the `keen-retry` library (to distinguish among fatal and transient errors).
 /// Consider using the `thiserror` crate if you prefer to log custom error messages instead of the error name.
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq, Eq, Hash)]
 pub enum ConnectionErrors {
     /// A fatal error -- no metter how many times we try
     #[error("Wrong Credentials.")]

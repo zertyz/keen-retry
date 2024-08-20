@@ -41,7 +41,8 @@ Now, in the application, you may use it via the zero-cost functional API:
 let resolved = connect_to_server()
     .retry_with(|_| connect_to_server())
     .<one-of-the-backoff-strategies>(...)
-    .<instrumentation-facilities>(...);
+    .<instrumentation-facilities>(...)
+    .<mapping-of-outputs-and-errors>(...);
 ```
 
 ### The `keen-retry` Diagram

@@ -114,7 +114,7 @@ KeenRetryExecutor<ReportedInput,
     /// Example:
     /// ```nocompile
     ///     // for an arithmetic progression in the sleeping times:
-    ///     .with_delays((100..=1000).step_by(100).map(|millis| Duration::from_millis(millis)))
+    ///     .with_delays((100..=1000).step_by(100).map(Duration::from_millis))
     ///     // for a geometric progression with a 1.289 ratio in 13 steps: sleeps from 1 to ~350ms
     ///     .with_delays((1..=13).map(|millis| Duration::from_millis(1.289f64.powi(millis)) as u64))
     #[inline(always)]

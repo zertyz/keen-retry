@@ -14,12 +14,13 @@
 
 mod external_lib;
 use external_lib::*;
-use keen_retry::{RetryProcedureResult, RetryResult};
+use keen_retry::{errors_to_occurrences_count, ResolvedResult, RetryProcedureResult, RetryResult};
 use std::{
     fmt::Debug,
     time::{Duration, SystemTime},
     sync::Arc,
 };
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use log::{error, info, warn};
@@ -165,6 +166,28 @@ async fn optable_api() -> Result<(), StdErrorType> {
     assert!(socket.receive().is_err(), "Operation didn't errored as it should at {case_name}");
 
     Ok(())
+}
+
+/// Shows that we can map the multiple errors that might occur --
+/// in this case, collect them to a hashmap with the count of occurrences as the keys
+#[tokio::test]
+async fn into_result_mapping_errors() {
+    let case_name = "A fatal error happened during the 10th connection retry attempt";
+    println!("\n{}:", case_name);
+    let socket = Socket::new(999, 10, 0, 0);
+    let expected = Err(HashMap::from([
+        (ConnectionErrors::ServerTooBusy, 9),       // transient errors
+        (ConnectionErrors::WrongCredentials, 1),    // the fatal error
+    ]));
+
+    let result = socket.connect_to_server().await
+        .retry_with_async(|_| socket.connect_to_server())
+        .with_exponential_jitter(|| keen_retry::ExponentialJitter::FromBackoffRange { backoff_range_millis: 10..=130, re_attempts: 10, jitter_ratio: 0.1 })
+        .await
+        .into_result_mapping_errors(errors_to_occurrences_count);
+
+    assert_eq!(result, expected, "The wrong `Result` was yielded");
+
 }
 
 /// Demonstrates how to bail out of retrying a consumer operation, dropping our custom errors and remapping the payload to `Result::Err(payload)`
