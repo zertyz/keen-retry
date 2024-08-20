@@ -14,7 +14,7 @@
 
 mod external_lib;
 use external_lib::*;
-use keen_retry::{errors_to_occurrences_count, ResolvedResult, RetryProcedureResult, RetryResult};
+use keen_retry::{errors_to_occurrences_count, RetryProcedureResult, RetryResult};
 use std::{
     fmt::Debug,
     time::{Duration, SystemTime},
@@ -250,6 +250,7 @@ async fn keen_connect_to_server(socket: &Arc<Socket>) -> Result<(), ConnectionEr
 ///     of the keen-retry API only. BTW, this kind of conversion is called `reported_input`, to be distinguished
 ///     from the original input -- only available on failures (as it was not consumed).
 ///   * if unsuccessful, the original and unconsumed input is placed in the `Err` returned.
+///
 /// As said, this method is bloated with `keen-retry` High Order Functions for demonstration purposes. For a more
 /// realistic usage, see [keen_receive()].
 async fn keen_send<T: Debug + PartialEq>
@@ -388,10 +389,10 @@ fn broadcast_continuation_closure<T: Clone + Debug + PartialEq + 'static>
                     _ => (),
                 }
             }
-            if transient_failed_targets.len() == 0 && fatal_failures.len() == 0 {
+            if transient_failed_targets.is_empty() && fatal_failures.is_empty() {
                 warn!("Ending BROADCAST with 100% success");
                 RetryResult::Ok { reported_input: (), output: () }
-            } else if transient_failed_targets.len() > 0 {
+            } else if !transient_failed_targets.is_empty() {
                 for target in transient_failed_targets.drain(..) {
                     list_of_targets.push(target);
                 }

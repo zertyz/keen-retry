@@ -423,7 +423,7 @@ pub fn errors_to_occurrences_count<ErrorType: Eq + Hash>
                                   -> HashMap<ErrorType, u16> {
     retry_errors
         .into_iter()
-        .chain([fatal_error].into_iter())
+        .chain([fatal_error])
         .fold(HashMap::new(), |mut acc, item| {
             *acc.entry(item).or_insert(0) += 1;
             acc

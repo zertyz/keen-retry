@@ -97,7 +97,8 @@ RetryResult<ReportedInput,
     }
 
     /// Changes the original input data to be re-fed to an operation that failed and will be retried.
-    ///   - `f(original_input) -> new_original_input`.\
+    ///   - `f(original_input) -> new_original_input`.
+    ///
     /// See [Self::map_ok()] if you'd rather change the "reported input" & output of an operation that succeeded.
     ///
     /// A nice usage would be to upgrade the initial payload to a tuple, keeping track of how much time will be spent retrying:
@@ -115,7 +116,8 @@ RetryResult<ReportedInput,
     }
 
     /// Changes the input & output data associated with an operation that was successful.
-    ///   - `f(reported_input, output) -> (new_reported_input, new_output)`.\
+    ///   - `f(reported_input, output) -> (new_reported_input, new_output)`.
+    ///
     /// See [Self::map_input()] if you'd rather change original input instead
     #[inline(always)]
     pub fn map_ok<NewReportedInput,

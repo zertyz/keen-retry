@@ -215,6 +215,7 @@ KeenRetryExecutor<ReportedInput,
     ///     will be reported as `fatal` and the `retry_loop()` will end.
     ///   - `on_non_fatal_failure(&input, error, &mut retry_errors_list)`
     ///     Called when the current retry attempt failed. Used to, optionally, push the error in the `retry_errors_list`.
+    ///
     /// See the sources of [Self::with_delays()] for a good example of how to use this low level function.
     #[inline(always)]
     pub fn retry_loop(self,
