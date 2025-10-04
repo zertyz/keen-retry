@@ -24,22 +24,23 @@ no-async = []
 
 
 [dependencies]
-log = "0.4"
-rand = "0.8"
-futures = { version = "0.3", optional = true }
-tokio = { version = "1", features = ["rt", "time", "macros"], optional = true }
+futures = { version = "0.3", default-features = false, optional = true }
+tokio = { version = "1", default-features = false, features = ["time"], optional = true }
+rand = { version = "0.9", default-features = false, features = ["small_rng"] }    # for the exponential jitter
 
 
 [dev-dependencies]
-ctor          = "0.2"    # setup and teardown for modules
-simple_logger = "4.0"    # a dirty console logger
-thiserror     = "1.0"
+tokio         = { version = "1", features = ["rt", "time", "macros"] }
+ctor          = "0.5"    # setup and teardown for modules
+log           = "0.4"
+simple_logger = "4.3"    # a dirty console logger
+thiserror     = "2"
 
 
 # dependencies for benchmarks
 #############################
 
-criterion = { version = "0.5", features=["html_reports"] }
+criterion = { version = "0.7", features=["html_reports"] }
 
 [[bench]]
 name = "zero_cost_abstractions"

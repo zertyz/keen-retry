@@ -81,7 +81,7 @@ KeenRetryAsyncExecutor<ReportedInput,
     ///   * [Self::with_delays()] for custom backoffs.
     pub async fn with_exponential_jitter(self,
                                          config_fn: impl FnOnce() -> ExponentialJitter<ErrorType>)
-                                         -> ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType> {
+                                        -> ResolvedResult<ReportedInput, OriginalInput, Output, ErrorType> {
         match config_fn() {
         
             ExponentialJitter::FromBackoffRange {
@@ -92,12 +92,12 @@ KeenRetryAsyncExecutor<ReportedInput,
 
             ExponentialJitter::UpToTimeout {
                 initial_backoff_millis,
-                expoent,
+                exponent,
                 re_attempts,
                 jitter_ratio,
                 timeout,
                 timeout_error,
-             } => self.with_delays_and_timeout(common::exponential_jitter_from_expoent(initial_backoff_millis, expoent, re_attempts, jitter_ratio), timeout, Some(timeout_error)).await,
+             } => self.with_delays_and_timeout(common::exponential_jitter_from_exponent(initial_backoff_millis, exponent, re_attempts, jitter_ratio), timeout, Some(timeout_error)).await,
         }
 
     }

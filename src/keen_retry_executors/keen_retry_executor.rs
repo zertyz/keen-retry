@@ -99,12 +99,12 @@ KeenRetryExecutor<ReportedInput,
 
             ExponentialJitter::UpToTimeout {
                 initial_backoff_millis,
-                expoent,
+                exponent,
                 re_attempts,
                 jitter_ratio,
                 timeout,
                 timeout_error,
-             } => self.with_delays_and_timeout(common::exponential_jitter_from_expoent(initial_backoff_millis, expoent, re_attempts, jitter_ratio), timeout, Some(timeout_error)),
+             } => self.with_delays_and_timeout(common::exponential_jitter_from_exponent(initial_backoff_millis, exponent, re_attempts, jitter_ratio), timeout, Some(timeout_error)),
         }
     }
 
