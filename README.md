@@ -3,25 +3,40 @@
 
 ## Introduction
 
-The `keen-retry` crate is designed to provide a zero-cost, flexible, and robust way to implement not only retry logic in Rust applications,
-and to make retries observable and composable, especially when retry logic lives across library and application boundaries.
+The `keen-retry` crate is designed to provide a zero-cost, flexible, and robust way to implement not only the retry logic in Rust applications,
+but also to make retries observable and composable, especially when retry logic lives across library and application boundaries.
 
 
 ## Features
 
   -  **Zero-Cost Abstraction**: Leverages Rust's powerful type system and compile-time optimizations to offer retry capabilities with no runtime overhead
-                                (see benches/zero_cost_abstractions.rs).
+                                (see `benches/zero_cost_abstractions.rs`).
   -  **Clear Error Discrimination**: Retrying operations that fail due to non-transient errors is futile, can waste resources and may ruin the application performance
-                                     -- model retryability as `RetryResult::{Transient,Fatal}` so callers don’t accidentally retry permanent failures.
+                                     -- model retryability as `RetryResult::{Ok,Transient,Fatal}` so callers don’t accidentally retry permanent failures.
   -  **Instrumentation and Logging**: Structured outputs + helpers to summarize retry errors + hook points to attach your logging/metrics, so you can fully inspect where your latency and resource utilization is going.
-  -  **Composable across lib/app boundaries**: library functions return retry-aware results; apps decide policy and can nest retries without losing context and avoiding unreasonable retrying times. 
+  -  **Composable across lib/app boundaries**: library functions return retry-aware results; apps decide policy and can nest retries without losing context and avoiding unwanted "retry storms". 
   -  **Async/Await Support**: First-class support for asynchronous programming, with async-friendly instrumentation hooks, backoff, and operation executors.
   -  **Flexible Backoff Strategies**: In addition to the recommended "exponential backoff with jitter", allows custom strategies to suit different usage scenarios.
 
 
 ## When to use this crate
-Use `keen-retry` when you need "retry as a value" structured outcomes, payload propagation, and diagnostic artifacts (especially in libraries and stream-heavy async code).
-If you just need "retry this closure with exponential backoff", `backoff` and `backon` may be simpler.
+
+Use `keen-retry` when retries are part of your architecture, not just a helper around a single call:
+
+- **You want retryability to be explicit and composable**: libraries return `RetryResult` (classification), applications attach backoff/limits/telemetry (policy), avoiding hidden “retry inside retry” behavior.
+- **You want the retry process as an output artifact**: structured final outcomes + retry history make logs/metrics/testing straightforward.
+- **You are writing stream-heavy async code** where preserving owned inputs and composing retry logic in a pipeline matters.
+- **You care about long-term maintainability of resiliency**: `keen-retry` turns retryability and retry outcomes into explicit types and artifacts. This provides guardrails for new contributors
+                                                              (less chance of accidentally retrying fatal errors or dropping retry instrumentation) and makes resiliency behavior easier to review and test as the codebase evolves.
+
+Prefer `backoff` / `backon` when you just need “retry this closure with exponential backoff” and don’t need retry history, payload propagation, or cross-layer composition.
+
+### Tradeoffs
+
+- `keen-retry` exposes more states and patterns than most workloads need. For simple use-cases it can feel like overkill, and the zero-cost approach often relies on monomorphization/inlining (which may increase compile time and binary size).
+- **Tradeoff:** the model is richer than “retry a closure”, so new contributors need to learn `RetryResult`/`ResolvedResult` and the producer/consumer patterns. For small workloads, that added surface area may not pay off.
+
+→ If you’ve ever had to add a second `notify` callback or a shared state struct just to get retry metrics, you’re in `keen-retry` territory.
 
 
 ## Quick Start
@@ -90,7 +105,7 @@ Note: other crates also support retryable vs non-retryable outcomes (e.g. `retry
 In other words: when an operation succeeds immediately or fails fatally on the first attempt (i.e., no `Transient` path), the
 retry wrapper gets optimized down to the equivalent of a hand-written `Result<T, E>` flow.
 
-The repository includes a Criterion benchmark (`benches/zero_cost_abstractions.rs`) that compares the use cases -- more details bellow.
+The repository includes a Criterion benchmark (`benches/zero_cost_abstractions.rs`) that measures the related use cases -- more details bellow.
 
 
 ### Ownership-friendly retries: zero-copy input propagation
@@ -109,7 +124,7 @@ This enables retry loops that can re-attempt work without requiring Clone on the
 ### Different observability story: Built-in diagnostics and observability hooks -- diagnostics are part of the value 
 
 `keen-retry` treats observability as a first-class feature, not an afterthought. The `ResolvedResult` type includes facilities for generating succinct diagnostic reports — e.g., aggregating a list of transient errors encountered across all retry attempts into a compact
-occurrence-count map (via the built-in error mapping closure `errors_to_occurrences_count` or your custom one). This is designed for production use where you want rich logs without writing boilerplate instrumentation code every time.
+occurrence-count map (via the built-in error mapping closure `errors_to_occurrences_count` or your custom one). This is designed for production use where you want rich logs (or rich error messages) without writing boilerplate instrumentation code every time.
 
 For production logging and metrics, `ResolvedResult` also provides hook points like `.inspect_recovered()`, `.inspect_given_up()`, and `.inspect_unrecoverable()`, so instrumentation can be attached directly to the resolved outcome without external state.
 
@@ -152,7 +167,7 @@ The key idea is that the “retry payload” can itself be a **callable continua
 (such as the remaining targets) and, on each attempt, performs only the unfinished work before returning a new retry outcome.
 In the example, this is implemented by building a continuation closure that retains the list of pending sockets and re-runs only the transient failures on the next attempt.
 
-*How this compares to mainstream retry crates*: you can implement “partial completion” with crates like `retry`, `backoff`, or `backon`, but it typically lives as an application-specific state machine
+**How this compares to mainstream retry crates**: you can implement “partial completion” with crates like `retry`, `backoff`, or `backon`, but it typically lives as an application-specific state machine
 hidden inside the retried closure. Those crates mostly model retries as “re-run the same closure/future until it returns Ok”, so keeping progress means maintaining mutable state across attempts
 (often via captured variables or shared state). For example, `retry` exposes `OperationResult::{Ok, Retry, Err}` and will keep calling the closure until it returns `Ok` or `Err`,
 which makes “resume where you left off” possible but entirely manual.
