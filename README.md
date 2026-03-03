@@ -3,20 +3,26 @@
 
 ## Introduction
 
-The `keen-retry` crate is designed to provide a zero-cost, flexible, and robust way to implement not only the retry logic in Rust applications,
-but also to make retries observable and composable, especially when retry logic lives across library and application boundaries.
+`keen-retry` is a retry framework for cases where retries are part of your architecture, not just a helper around one call.
+It models retryability as a **value** that can be composed across library/application boundaries, and produces a **diagnosable final outcome** suitable for metrics, logging, and testing.
+It is designed for ownership-heavy, stream-oriented async code, allowing the preservation of input/state when resuming partially completed work matters.
 
 
 ## Features
 
-  -  **Zero-Cost Abstraction**: Leverages Rust's powerful type system and compile-time optimizations to offer retry capabilities with no runtime overhead
-                                (see `benches/zero_cost_abstractions.rs`).
-  -  **Clear Error Discrimination**: Retrying operations that fail due to non-transient errors is futile, can waste resources and may ruin the application performance
-                                     -- model retryability as `RetryResult::{Ok,Transient,Fatal}` so callers don’t accidentally retry permanent failures.
-  -  **Instrumentation and Logging**: Structured outputs + helpers to summarize retry errors + hook points to attach your logging/metrics, so you can fully inspect where your latency and resource utilization is going.
-  -  **Composable across lib/app boundaries**: library functions return retry-aware results; apps decide policy and can nest retries without losing context and avoiding unwanted "retry storms". 
-  -  **Async/Await Support**: First-class support for asynchronous programming, with async-friendly instrumentation hooks, backoff, and operation executors.
-  -  **Flexible Backoff Strategies**: In addition to the recommended "exponential backoff with jitter", allows custom strategies to suit different usage scenarios.
+  - **Zero-Cost Abstraction**: Leverages Rust's powerful type system and compile-time optimizations to offer retry capabilities with no runtime overhead
+                               (see `benches/zero_cost_abstractions.rs`).
+  - **Clear Error Discrimination**: Retrying operations that fail due to non-transient errors is futile, can waste resources and may ruin the application performance
+                                    -- model retryability as `RetryResult::{Ok,Transient,Fatal}` so callers don’t accidentally retry permanent failures.
+                                    That’s also the foundation for **resumability**. Keep reading.
+  - **Instrumentation and Logging**: Structured outputs + helpers to summarize retry errors + hook points to attach your logging/metrics, so you can fully inspect where your latency and resource utilization is going.
+  - **Composable across lib/app boundaries**: library functions return retry-aware results; apps decide policy and can nest retries without losing context and avoiding unwanted "retry storms". 
+  - **Async/Await Support**: First-class support for asynchronous programming, with async-friendly instrumentation hooks, backoff, and operation executors.
+  - **Flexible Backoff Strategies**: In addition to the recommended "exponential backoff with jitter", allows custom strategies to suit different usage scenarios.
+  - **Resume where you left off — without enforcing policies at the API**: `keen‑retry` encourages your API to return tri‑state results (`Ok` | `Transient` | `Fatal`). In the `Transient` case, you return the resume
+                                                                           state needed to continue; the application then decides if/when/how to retry via a fluent chain like `.retry_with(...).<backoff>()`.
+                                                                           No sleeps or loops inside your library; policy stays in the app, while your types model retryability.
+                                                                           See the **Partial Completion via Continuation Closure** pattern bellow.
 
 
 ## When to use this crate
@@ -24,12 +30,17 @@ but also to make retries observable and composable, especially when retry logic 
 Use `keen-retry` when retries are part of your architecture, not just a helper around a single call:
 
 - **You want retryability to be explicit and composable**: libraries return `RetryResult` (classification), applications attach backoff/limits/telemetry (policy), avoiding hidden “retry inside retry” behavior.
+- **You are writing a library that exposes one high-level operation but internally performs many retryable steps** (fan-out, pipelines, “sync” workflows). `keen-retry` lets the library classify failures and carry resumable state,
+                                                                                                                   while the application owns retry policy (budgets/backoff/telemetry) at the boundary, avoiding “hidden retries” and
+                                                                                                                   combinatorial retry growth.
+  * This is also where the **Partial Completion via Continuation Closure** pattern fits: retries can resume from the remaining work instead of restarting from scratch. More details bellow. 
 - **You want the retry process as an output artifact**: structured final outcomes + retry history make logs/metrics/testing straightforward.
 - **You are writing stream-heavy async code** where preserving owned inputs and composing retry logic in a pipeline matters.
 - **You care about long-term maintainability of resiliency**: `keen-retry` turns retryability and retry outcomes into explicit types and artifacts. This provides guardrails for new contributors
                                                               (less chance of accidentally retrying fatal errors or dropping retry instrumentation) and makes resiliency behavior easier to review and test as the codebase evolves.
 
 Prefer `backoff` / `backon` when you just need “retry this closure with exponential backoff” and don’t need retry history, payload propagation, or cross-layer composition.
+
 
 ### Tradeoffs
 
@@ -190,7 +201,7 @@ Async support is also feature-gated: by default the crate enables async with the
 
 **Legend**:
  * “Built-in” means modeled directly by the crate’s primary types/APIs.
- * “Manual” means possible, but you’ll implement it via captured state/context + notify/callbacks.
+ * “Manual” means possible, but you need to implement (and re-implement) it via captured state/context + notify/callbacks at each call site.
 
 | **Feature**                                      | `retry`                                   | `backoff`                                      | `backon`                                    | `keen-retry`                                                     |
 |--------------------------------------------------|-------------------------------------------|------------------------------------------------|---------------------------------------------|------------------------------------------------------------------|
@@ -201,7 +212,7 @@ Async support is also feature-gated: by default the crate enables async with the
 | **Ownership-friendly payload propagation**       | Manual via captured state                 | Manual via captured state                      | Manual via `.context(...)`                  | Built-in: original input carried in `Transient/Fatal`            | 
 | **Observability hooks + summaries**              | Manual                                    | Per-attempt `notify` (manual aggregation)      | Per-attempt `notify` (manual aggregation)   | Built-in “retry artifact” + hooks + summary helpers              |
 | **Full `async` support**                         | No                                        | Partial: per-attempt `notify` is still sync    | Partial: per-attempt `notify` is still sync | Yes. The final "retry artifact" doesn't use `notify` for metrics |
-| **Partial completion / continuation workflows**  | Manual state machine in closure           | Manual state machine in closure                | Manual state machine via context            | Pattern supported naturally as retry payload/continuation        |
+| **Resumability / continuation workflows**        | Manual state machine in closure           | Manual state machine in closure                | Manual state machine via context            | Pattern supported naturally as retry payload/continuation        |
 | **Zero-cost non-retry path (benchmarked)**       | Not claimed                               | Not claimed                                    | Not claimed                                 | Yes (see `benches/zero_cost_abstractions.rs`)                    |
 | **Companion guide**                              | Docs/examples                             | Docs/examples                                  | Docs/examples                               | Yes (book + patterns)                                            |
 
