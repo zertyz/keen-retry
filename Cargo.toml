@@ -1,6 +1,6 @@
 [package]
 name = "keen-retry"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2021"
 description   = "Retry-as-a-value: zero-cost, ownership-friendly retries with diagnosable outcomes with full async and lib/app boundaries support"
 keywords      = ["retry", "backoff", "zero-copy", "resilience", "functional"]
